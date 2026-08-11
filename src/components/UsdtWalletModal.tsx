@@ -10,6 +10,7 @@ interface UsdtWalletModalProps {
   userUsdtBalance: number;
   userWalletAddress: string;
   onSendSuccess: (amount: number, recipient: string) => void;
+  onClaimDemoUsdt?: () => void;
 }
 
 export default function UsdtWalletModal({
@@ -18,7 +19,8 @@ export default function UsdtWalletModal({
   mode: initialMode,
   userUsdtBalance,
   userWalletAddress,
-  onSendSuccess
+  onSendSuccess,
+  onClaimDemoUsdt
 }: UsdtWalletModalProps) {
   const [activeTab, setActiveTab] = useState<'SEND' | 'RECEIVE'>(initialMode);
   const [selectedChain, setSelectedChain] = useState<'SOLANA' | 'BSC' | 'ETH' | 'POLYGON' | 'ARBITRUM'>('SOLANA');

@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Gold Coin 3D Animation</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Orbitron:wght@400;700;900&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --gold1: #FFD700;
+      --gold2: #FFA500;
+      --gold3: #B8860B;
+      --gold4: #FFEC80;
+      --shine: #FFFDE7;
+    }
+
+    body {
+      min-height: 100vh;
+      background: radial-gradient(ellipse at 60% 40%, #1a0a00 0%, #0d0500 60%, #000 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      font-family: 'Orbitron', sans-serif;
+    }
+
+    /* ── PARTICLE FIELD ── */
+    .particles { position: fixed; inset: 0; pointer-events: none; }
+    .particle {
+      position: absolute;
+      border-radius: 50%;
+      animation: floatUp linear infinite;
+      opacity: 0;
+    }
+
+    @keyframes floatUp {
+      0%   { opacity: 0; transform: translateY(0) scale(0.5); }
+      10%  { opacity: 1; }
+      90%  { opacity: 0.6; }
+      100% { opacity: 0; transform: translateY(-100vh) scale(1.2); }
+    }
+
+    /* ── TITLE ── */
+    .title {
+      font-family: 'Cinzel', serif;
+      font-size: clamp(1.4rem, 4vw, 2.8rem);
+      font-weight: 900;
+      color: var(--gold1);
+      text-shadow: 0 0 30px #FFD70088, 0 0 60px #FFA50055, 0 2px 4px #000;
+      letter-spacing: 0.15em;
+      margin-bottom: 2.5rem;
+      animation: titlePulse 3s ease-in-out infinite;
+    }
+    @keyframes titlePulse {
+      0%, 100% { text-shadow: 0 0 30px #FFD70088, 0 0 60px #FFA50055, 0 2px 4px #000; }
+      50%       { text-shadow: 0 0 60px #FFD700cc, 0 0 120px #FFA50088, 0 2px 4px #000; }
+    }
+
+    /* ── SCENE ── */
+    .scene {
+      perspective: 800px;
+      width: 260px; height: 260px;
+      position: relative;
+      cursor: grab;
+    }
+    .scene:active { cursor: grabbing; }
+
+    /* ── COIN WRAPPER (rotates) ── */
+    .coin-wrapper {
+      width: 100%; height: 100%;
+      transform-style: preserve-3d;
+      animation: spinCoin 4s linear infinite;
+    }
+    @keyframes spinCoin {
+      0%   { transform: rotateY(0deg)   rotateX(8deg); }
+      100% { transform: rotateY(360deg) rotateX(8deg); }
+    }
+
+    /* ── COIN FACES ── */
+    .coin-face {
+      position: absolute;
+      width: 260px; height: 260px;
+      border-radius: 50%;
+      backface-visibility: hidden;
+    }
+
+    /* FRONT FACE */
+    .coin-front {
+      background:
+        radial-gradient(circle at 35% 30%, #FFFDE7 0%, #FFD700 30%, #FFA500 60%, #B8860B 85%, #7B5E00 100%);
+      box-shadow:
+        inset -8px -8px 20px #7B5E00aa,
+        inset  8px  8px 20px #FFFDE7aa,
+        0 0 60px #FFD70066,
+        0 0 120px #FFA50033;
+      transform: translateZ(20px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    /* Inner ring */
+    .coin-front::before {
+      content: '';
+      position: absolute;
+      inset: 18px;
+      border-radius: 50%;
+      border: 4px solid #B8860B88;
+      box-shadow: inset 0 0 12px #FFA50055, 0 0 8px #FFD70044;
+    }
+    /* Shine streak */
+    .coin-front::after {
+      content: '';
+      position: absolute;
+      width: 40px; height: 200px;
+      background: linear-gradient(180deg, transparent, rgba(255,253,231,0.55) 50%, transparent);
+      transform: rotate(-35deg) translateX(-40px);
+      animation: shineMove 4s linear infinite;
+      border-radius: 50%;
+    }
+    @keyframes shineMove {
+      0%   { transform: rotate(-35deg) translateX(-200px); opacity: 0; }
+      20%  { opacity: 1; }
+      50%  { transform: rotate(-35deg) translateX(200px); opacity: 0; }
+      100% { transform: rotate(-35deg) translateX(200px); opacity: 0; }
+    }
+
+    /* BACK FACE */
+    .coin-back {
+      background:
+        radial-gradient(circle at 65% 70%, #FFFDE7 0%, #FFD700 30%, #FFA500 60%, #B8860B 85%, #7B5E00 100%);
+      box-shadow:
+        inset 8px 8px 20px #7B5E00aa,
+        inset -8px -8px 20px #FFFDE7aa,
+        0 0 60px #FFD70066;
+      transform: translateZ(-20px) rotateY(180deg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .coin-back::before {
+      content: '';
+      position: absolute;
+      inset: 18px;
+      border-radius: 50%;
+      border: 4px solid #B8860B88;
+      box-shadow: inset 0 0 12px #FFA50055;
+    }
+
+    /* EDGE (cylinder) */
+    .coin-edge {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 40px;
+      height: 260px;
+      transform: translate(-50%, -50%) rotateY(90deg) translateZ(0);
+      background: linear-gradient(to right,
+        #7B5E00 0%, #B8860B 20%, #FFD700 40%, #FFA500 60%, #B8860B 80%, #7B5E00 100%);
+      border-radius: 4px;
+    }
+
+    /* ── EMBLEM on front ── */
+    .emblem {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .star-symbol {
+      font-size: 70px;
+      line-height: 1;
+      filter: drop-shadow(0 2px 8px #7B5E00) drop-shadow(0 0 16px #FFD700cc);
+      animation: starPulse 2s ease-in-out infinite;
+    }
+    @keyframes starPulse {
+      0%, 100% { filter: drop-shadow(0 2px 8px #7B5E00) drop-shadow(0 0 16px #FFD700cc); }
+      50%       { filter: drop-shadow(0 2px 16px #7B5E00) drop-shadow(0 0 32px #FFD700ff); }
+    }
+    .coin-text {
+      font-family: 'Cinzel', serif;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.3em;
+      color: #7B5E00;
+      text-shadow: 0 1px 2px #FFD70066;
+    }
+
+    /* Back emblem */
+    .back-emblem {
+      position: relative;
+      z-index: 2;
+      font-size: 80px;
+      filter: drop-shadow(0 2px 8px #7B5E00);
+    }
+
+    /* ── GLOW RING ── */
+    .glow-ring {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 340px; height: 340px;
+      border-radius: 50%;
+      background: radial-gradient(circle, transparent 40%, #FFD70022 60%, transparent 75%);
+      animation: ringPulse 2s ease-in-out infinite;
+      pointer-events: none;
+    }
+    @keyframes ringPulse {
+      0%, 100% { transform: translate(-50%,-50%) scale(1);   opacity: 0.6; }
+      50%       { transform: translate(-50%,-50%) scale(1.15); opacity: 1;   }
+    }
+
+    /* ── SHADOW ── */
+    .shadow {
+      width: 200px; height: 30px;
+      background: radial-gradient(ellipse, rgba(255,165,0,0.35) 0%, transparent 70%);
+      border-radius: 50%;
+      margin-top: 1.8rem;
+      animation: shadowPulse 4s linear infinite;
+    }
+    @keyframes shadowPulse {
+      0%,100% { transform: scaleX(1);   opacity: 0.6; }
+      50%      { transform: scaleX(0.6); opacity: 0.3; }
+    }
+
+    /* ── FLOATING COINS ── */
+    .mini-coins { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+    .mini-coin {
+      position: absolute;
+      font-size: 24px;
+      animation: miniFloat linear infinite;
+      opacity: 0;
+      filter: drop-shadow(0 0 8px #FFD700);
+    }
+    @keyframes miniFloat {
+      0%   { opacity: 0; transform: translateY(110vh) rotate(0deg); }
+      10%  { opacity: 0.9; }
+      90%  { opacity: 0.5; }
+      100% { opacity: 0; transform: translateY(-10vh) rotate(720deg); }
+    }
+
+    /* ── STATS / LABEL ── */
+    .info-bar {
+      margin-top: 2rem;
+      display: flex;
+      gap: 2rem;
+      align-items: center;
+    }
+    .badge {
+      padding: 6px 18px;
+      border-radius: 999px;
+      border: 1px solid #FFD70055;
+      background: rgba(255,215,0,0.06);
+      color: var(--gold2);
+      font-size: 0.7rem;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      backdrop-filter: blur(6px);
+      animation: badgePulse 3s ease-in-out infinite;
+    }
+    @keyframes badgePulse {
+      0%,100% { border-color: #FFD70055; box-shadow: none; }
+      50%      { border-color: #FFD700cc; box-shadow: 0 0 12px #FFD70044; }
+    }
+
+    /* ── SPEED CONTROL ── */
+    .controls {
+      margin-top: 2rem;
+      display: flex;
+      gap: 1rem;
+    }
+    .ctrl-btn {
+      padding: 8px 20px;
+      border-radius: 8px;
+      border: 1px solid #FFD70055;
+      background: rgba(255,215,0,0.08);
+      color: var(--gold1);
+      font-family: 'Orbitron', sans-serif;
+      font-size: 0.65rem;
+      letter-spacing: 0.15em;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    .ctrl-btn:hover {
+      background: rgba(255,215,0,0.2);
+      border-color: #FFD700;
+      box-shadow: 0 0 20px #FFD70055;
+      transform: translateY(-2px);
+    }
+    .ctrl-btn.active {
+      background: rgba(255,215,0,0.25);
+      border-color: #FFD700;
+      box-shadow: 0 0 25px #FFD70077;
+    }
+  </style>
+</head>
+<body>
+
+<!-- Particles -->
+<div class="particles" id="particles"></div>
+
+<!-- Floating mini coins -->
+<div class="mini-coins" id="miniCoins"></div>
+
+<!-- Title -->
+<div class="title">✦ GOLD COIN ✦</div>
+
+<!-- Coin Scene -->
+<div class="scene" id="scene">
+  <div class="glow-ring"></div>
+  <div class="coin-wrapper" id="coinWrapper">
+
+    <!-- Front face -->
+    <div class="coin-face coin-front">
+      <div class="emblem">
+        <div class="star-symbol">⭐</div>
+        <div class="coin-text">GOLD</div>
+      </div>
+    </div>
+
+    <!-- Back face -->
+    <div class="coin-face coin-back">
+      <div class="back-emblem">🏆</div>
+    </div>
+
+    <!-- Edge -->
+    <div class="coin-edge"></div>
+  </div>
+</div>
+
+<!-- Shadow -->
+<div class="shadow" id="shadow"></div>
+
+<!-- Info bar -->
+<div class="info-bar">
+  <div class="badge">Pure Gold</div>
+  <div class="badge">24K</div>
+  <div class="badge">999.9</div>
+</div>
+
+<!-- Speed controls -->
+<div class="controls">
+  <button class="ctrl-btn" id="btnSlow">🐢 Slow</button>
+  <button class="ctrl-btn active" id="btnNormal">⚡ Normal</button>
+  <button class="ctrl-btn" id="btnFast">🔥 Fast</button>
+  <button class="ctrl-btn" id="btnFlip">🔄 Flip</button>
+</div>
+
+<script>
+  /* ── PARTICLES ── */
+  const pContainer = document.getElementById('particles');
+  for (let i = 0; i < 60; i++) {
+    const p = document.createElement('div');
+    p.className = 'particle';
+    const size = Math.random() * 5 + 2;
+    const hue = 35 + Math.random() * 20;
+    p.style.cssText = `
+      width:${size}px; height:${size}px;
+      left:${Math.random()*100}%;
+      bottom:${Math.random()*20}%;
+      background: hsl(${hue},100%,${50+Math.random()*30}%);
+      box-shadow: 0 0 ${size*2}px hsl(${hue},100%,70%);
+      animation-duration:${4+Math.random()*8}s;
+      animation-delay:${Math.random()*6}s;
+    `;
+    pContainer.appendChild(p);
+  }
+
+  /* ── MINI FLOATING COINS ── */
+  const mcContainer = document.getElementById('miniCoins');
+  const coinEmojis = ['🪙','💰','✨','⭐','💛'];
+  for (let i = 0; i < 18; i++) {
+    const mc = document.createElement('div');
+    mc.className = 'mini-coin';
+    mc.textContent = coinEmojis[Math.floor(Math.random()*coinEmojis.length)];
+    mc.style.cssText = `
+      left:${Math.random()*100}%;
+      animation-duration:${5+Math.random()*10}s;
+      animation-delay:${Math.random()*8}s;
+      font-size:${14+Math.random()*22}px;
+    `;
+    mcContainer.appendChild(mc);
+  }
+
+  /* ── SPEED CONTROL ── */
+  const wrapper = document.getElementById('coinWrapper');
+  const speeds = { slow:'8s', normal:'4s', fast:'1.5s' };
+  let currentSpeed = 'normal';
+  let flipped = false;
+
+  function setSpeed(name) {
+    currentSpeed = name;
+    wrapper.style.animationDuration = speeds[name];
+    document.querySelectorAll('.ctrl-btn').forEach(b => b.classList.remove('active'));
+  }
+
+  document.getElementById('btnSlow').addEventListener('click', () => {
+    setSpeed('slow');
+    document.getElementById('btnSlow').classList.add('active');
+  });
+  document.getElementById('btnNormal').addEventListener('click', () => {
+    setSpeed('normal');
+    document.getElementById('btnNormal').classList.add('active');
+  });
+  document.getElementById('btnFast').addEventListener('click', () => {
+    setSpeed('fast');
+    document.getElementById('btnFast').classList.add('active');
+  });
+  document.getElementById('btnFlip').addEventListener('click', () => {
+    flipped = !flipped;
+    wrapper.style.animationName = flipped ? 'spinCoinReverse' : 'spinCoin';
+    document.getElementById('btnFlip').classList.toggle('active', flipped);
+  });
+
+  /* Inject reverse keyframe */
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes spinCoinReverse {
+      0%   { transform: rotateY(0deg)    rotateX(-8deg); }
+      100% { transform: rotateY(-360deg) rotateX(-8deg); }
+    }
+  `;
+  document.head.appendChild(style);
+
+  /* ── MOUSE DRAG INTERACTION ── */
+  const scene = document.getElementById('scene');
+  let isDragging = false, startX = 0, startY = 0;
+  let extraRotX = 8, extraRotY = 0;
+  let animPaused = false;
+  let pausedAt = '';
+
+  scene.addEventListener('mousedown', e => {
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    // Pause CSS animation and take over
+    const matrix = new WebKitCSSMatrix(getComputedStyle(wrapper).transform);
+    wrapper.style.animationPlayState = 'paused';
+    animPaused = true;
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    extraRotY += dx * 0.8;
+    extraRotX -= dy * 0.4;
+    extraRotX = Math.max(-45, Math.min(45, extraRotX));
+    wrapper.style.transform = `rotateY(${extraRotY}deg) rotateX(${extraRotX}deg)`;
+    startX = e.clientX;
+    startY = e.clientY;
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!isDragging) return;
+    isDragging = false;
+    // Resume animation
+    setTimeout(() => {
+      wrapper.style.transform = '';
+      wrapper.style.animationPlayState = 'running';
+    }, 500);
+  });
+
+  /* ── TOUCH SUPPORT ── */
+  scene.addEventListener('touchstart', e => {
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+    wrapper.style.animationPlayState = 'paused';
+  }, { passive: true });
+
+  scene.addEventListener('touchmove', e => {
+    const dx = e.touches[0].clientX - startX;
+    const dy = e.touches[0].clientY - startY;
+    extraRotY += dx * 0.8;
+    extraRotX -= dy * 0.4;
+    extraRotX = Math.max(-45, Math.min(45, extraRotX));
+    wrapper.style.transform = `rotateY(${extraRotY}deg) rotateX(${extraRotX}deg)`;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+
+  scene.addEventListener('touchend', () => {
+    setTimeout(() => {
+      wrapper.style.transform = '';
+      wrapper.style.animationPlayState = 'running';
+    }, 500);
+  });
+
+  /* ── SHADOW SYNC (parallax feel) ── */
+  // shadow naturally animates via CSS
+</script>
+</body>
+</html>
