@@ -33,6 +33,7 @@ import ReceiveGoldModal from '@/components/ReceiveGoldModal';
 import UsdtWalletModal from '@/components/UsdtWalletModal';
 import VirtualGoldLogo from '@/components/VirtualGoldLogo';
 import VirtualGoldTrustSection from '@/components/VirtualGoldTrustSection';
+import VirtualGoldFaqSection from '@/components/VirtualGoldFaqSection';
 import AdminApprovalDashboardModal, { PendingUpiOrder } from '@/components/AdminApprovalDashboardModal';
 import MerchantApplicationModal from '@/components/MerchantApplicationModal';
 import P2pMerchantMarketplace from '@/components/P2pMerchantMarketplace';
@@ -382,6 +383,9 @@ export default function Home() {
 
         {/* SECTION 3.5: Mathematical Integrity & Anti-Scam Wealth Multiplier Section */}
         <VirtualGoldTrustSection />
+
+        {/* SECTION 3.8: Interactive Protocol FAQ Accordion Section */}
+        <VirtualGoldFaqSection />
 
         {/* SECTION 4: 10/10 Formally Verified Security & Invariants Banner */}
         <section className="gold-glass-card p-6 sm:p-8 border-gold-glow relative overflow-hidden">
