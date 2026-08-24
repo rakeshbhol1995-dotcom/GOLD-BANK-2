@@ -64,7 +64,7 @@ export default function UniversalGoldSwapWidget({
 
     if (swapMode === 'BUY') {
       if (userUsdtBalance < estimatedCostUsdt) {
-        alert('Insufficient USDT balance! Click "Get +1,000 Test USDT Faucet" in your wallet bar to refill.');
+        alert('Insufficient USDT balance! Please top up your wallet with USDT to proceed.');
         return;
       }
       setIsSwapping(true);

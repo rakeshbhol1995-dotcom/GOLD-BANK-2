@@ -40,7 +40,6 @@ interface MerchantApplicationModalProps {
   userUsdtBalance: number;
   onSubmitted: (app: MerchantApplication) => void;
   onDeductCollateral: (amountUsdt: number) => void;
-  onClaimFaucet?: () => void;
 }
 
 export default function MerchantApplicationModal({
@@ -48,8 +47,7 @@ export default function MerchantApplicationModal({
   onClose,
   userUsdtBalance,
   onSubmitted,
-  onDeductCollateral,
-  onClaimFaucet
+  onDeductCollateral
 }: MerchantApplicationModalProps) {
   const [fullName, setFullName] = useState('');
   const [businessName, setBusinessName] = useState('');
@@ -250,20 +248,9 @@ export default function MerchantApplicationModal({
               </div>
 
               {!hasEnoughCollateral ? (
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-1 border-t border-red-500/20">
-                  <div className="text-[11px] font-bold text-red-400 flex items-center gap-1">
-                    <AlertCircle className="w-4 h-4 shrink-0" />
-                    <span>Insufficient Collateral (${userUsdtBalance.toFixed(2)} / $2,000.00 USDT)</span>
-                  </div>
-                  {onClaimFaucet && (
-                    <button
-                      type="button"
-                      onClick={onClaimFaucet}
-                      className="px-3 py-1.5 rounded-lg bg-yellow-500 text-black font-extrabold text-xs uppercase tracking-wider hover:scale-105 transition-all shrink-0 flex items-center gap-1"
-                    >
-                      <Gift className="w-3.5 h-3.5" /> Refill +1,000 Test USDT
-                    </button>
-                  )}
+                <div className="text-[11px] font-bold text-red-400 flex items-center gap-1 pt-1 border-t border-red-500/20">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>Insufficient Collateral (${userUsdtBalance.toFixed(2)} / $2,000.00 USDT required to apply)</span>
                 </div>
               ) : (
                 <div className="text-[11px] font-bold text-emerald-400 flex items-center gap-1 pt-1">

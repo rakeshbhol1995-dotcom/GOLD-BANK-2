@@ -21,7 +21,8 @@ import {
   Info,
   Send,
   QrCode,
-  Building
+  Building,
+  LayoutDashboard
 } from 'lucide-react';
 import GoldCoin3D, { alloyConfigs, AlloyType } from '@/components/GoldCoin3D';
 import GoldPriceChart from '@/components/GoldPriceChart';
@@ -114,12 +115,6 @@ export default function Home() {
   const [isSpinning, setIsSpinning] = useState(true);
   const [isSparklesActive, setIsSparklesActive] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
-
-  // Demo Balance Faucet Handler
-  const handleClaimDemoFaucet = () => {
-    setUsdtBalance((prev) => prev + 1000);
-    setUserTokenBalance((prev) => prev + 10);
-  };
 
   // Modals & Tx Tracking
   const [isCertModalOpen, setIsCertModalOpen] = useState(false);
@@ -233,9 +228,6 @@ export default function Home() {
   return (
     <div className="min-h-screen text-zinc-100 flex flex-col justify-between selection:bg-yellow-500 selection:text-black bg-[#080B11]">
       
-      {/* Live CloudExchange Ticker Header Bar */}
-      <CloudExchangeTickerBar goldPriceUsdt={currentPrice} p2pInrRate={94.50} />
-
       {/* Animated Galaxy Cosmos Canvas (Twinkling Stars, Floating Golden Moon & Shooting Meteors) */}
       <GalaxyCosmosBackground />
 
@@ -255,7 +247,7 @@ export default function Home() {
         <header className="flex flex-col sm:flex-row items-center justify-between py-4 border-b border-yellow-500/20 gap-4 backdrop-blur-md sticky top-0 z-40 bg-black/80 rounded-2xl px-6 border">
           <VirtualGoldLogo size={42} />
 
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             {/* Live Price & Floor Badge */}
             <div className="hidden md:flex items-center gap-3 px-4 py-2 rounded-full bg-black/80 border border-yellow-500/30 text-xs">
               <div className="flex items-center gap-1.5">
@@ -269,6 +261,14 @@ export default function Home() {
                 <span>P_floor: ${currentFloor.toFixed(4)}</span>
               </div>
             </div>
+
+            {/* Merchant Agent Portal Page Link */}
+            <Link
+              href="/merchant"
+              className="px-3.5 py-2 rounded-xl bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/40 text-yellow-300 font-extrabold text-xs flex items-center gap-1.5 transition-all shadow-md active:scale-95"
+            >
+              <Building className="w-3.5 h-3.5 text-yellow-400" /> Merchant Agent (/merchant)
+            </Link>
 
             {/* Governance Portal Link */}
             <Link
@@ -341,14 +341,6 @@ export default function Home() {
 
           {/* Wallet Control Action Buttons + Faucet */}
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
-            <button
-              onClick={handleClaimDemoFaucet}
-              className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-yellow-500 via-amber-500 to-yellow-600 text-black font-black text-xs flex items-center gap-1.5 shadow-lg shadow-yellow-500/20 hover:scale-105 active:scale-95 transition-all"
-              title="Add +$1,000 Test USDT & +10 Grams $GOLD!"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-black" /> Get +1,000 Test USDT Faucet
-            </button>
-
             <button
               onClick={() => {
                 setUsdtModalMode('SEND');
@@ -585,6 +577,7 @@ export default function Home() {
             activeMerchantId={activeMerchantId}
             onOpenMerchantAppModal={() => setIsMerchantAppModalOpen(true)}
             onOpenMerchantDashboardModal={() => setIsMerchantDashboardModalOpen(true)}
+            onOpenAdminDashboardModal={() => setIsAdminModalOpen(true)}
             onTradeCompleted={(type, grams, inr, usdt) => {
               if (type === 'BUY') {
                 handleBuyTx(grams, usdt, usdt * 0.98);
@@ -805,7 +798,6 @@ export default function Home() {
         isOpen={isMerchantAppModalOpen}
         onClose={() => setIsMerchantAppModalOpen(false)}
         userUsdtBalance={usdtBalance}
-        onClaimFaucet={handleClaimDemoFaucet}
         onDeductCollateral={(amountUsdt) => {
           setUsdtBalance((prev) => Math.max(0, prev - amountUsdt));
         }}

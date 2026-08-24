@@ -55,6 +55,7 @@ interface P2pMerchantMarketplaceProps {
   onTradeCompleted: (type: 'BUY' | 'SELL', goldGrams: number, inrAmount: number, usdtAmount: number) => void;
   onOpenMerchantAppModal: () => void;
   onOpenMerchantDashboardModal?: () => void;
+  onOpenAdminDashboardModal?: () => void;
 }
 
 const INITIAL_MERCHANTS: P2pMerchantListing[] = [
@@ -112,7 +113,8 @@ export default function P2pMerchantMarketplace({
   activeMerchantId,
   onTradeCompleted,
   onOpenMerchantAppModal,
-  onOpenMerchantDashboardModal
+  onOpenMerchantDashboardModal,
+  onOpenAdminDashboardModal
 }: P2pMerchantMarketplaceProps) {
   const [activeTab, setActiveTab] = useState<'BUY' | 'SELL'>('BUY');
   const [merchantListings, setMerchantListings] = useState<P2pMerchantListing[]>(INITIAL_MERCHANTS);
@@ -232,6 +234,16 @@ export default function P2pMerchantMarketplace({
           <p className="text-xs text-zinc-400 mt-0.5">
             Buy & Sell $GOLD directly with verified P2P Merchants using GPay, PhonePe, Paytm, or Bank UPI.
           </p>
+        </div>
+
+        {/* Merchant Standalone Page Link */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/merchant"
+            className="px-3.5 py-2 rounded-xl bg-yellow-500/20 hover:bg-yellow-500/30 border border-yellow-500/40 text-yellow-300 text-xs font-bold flex items-center gap-1.5 transition-all shadow-md active:scale-95"
+          >
+            <Building className="w-3.5 h-3.5 text-yellow-400" /> Merchant Agent Portal (/merchant)
+          </Link>
         </div>
       </div>
 
