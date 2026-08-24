@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, Wallet, Copy, Check, QrCode, ArrowRight, ShieldCheck, CheckCircle2, Zap, RefreshCw, Edit3, Settings } from 'lucide-react';
+import { SUPPORTED_USDT_CHAINS, SupportedChainKey, sendWeb3UsdtTransfer } from '@/services/multiChainUsdtService';
 
 interface Web3UsdtTransferModalProps {
   isOpen: boolean;
@@ -16,7 +17,9 @@ const DEFAULT_VAULT_ADDRESSES: Record<string, string> = {
   BSC: '0x3A21C89A293F421892BCAFE481909823419093',
   POLYGON: '0x99B44E10a9f821892BCAFE481909823419094',
   ARBITRUM: '0xE8a77B40c9f821892BCAFE481909823419095',
-  SOLANA: 'VGOLDVaultReservePDA11111111111111111111'
+  SOLANA: 'VGOLDVaultReserveUSDTAccount111111111111111',
+  AVALANCHE: '0x11B55B40c9f821892BCAFE481909823419096',
+  OPTIMISM: '0x44C77B40c9f821892BCAFE481909823419097'
 };
 
 export default function Web3UsdtTransferModal({
@@ -26,13 +29,14 @@ export default function Web3UsdtTransferModal({
   usdtCost,
   onTransferSuccess
 }: Web3UsdtTransferModalProps) {
-  const [selectedChain, setSelectedChain] = useState<'ETH' | 'BSC' | 'POLYGON' | 'ARBITRUM' | 'SOLANA'>('ETH');
+  const [selectedChain, setSelectedChain] = useState<SupportedChainKey>('ETH');
   const [vaultAddresses, setVaultAddresses] = useState<Record<string, string>>(DEFAULT_VAULT_ADDRESSES);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
   const [customAddressInput, setCustomAddressInput] = useState('');
   const [copied, setCopied] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [txHashResult, setTxHashResult] = useState('');
 
   // Load custom vault addresses from localStorage if saved by owner/admin
   useEffect(() => {
@@ -47,7 +51,7 @@ export default function Web3UsdtTransferModal({
 
   if (!isOpen) return null;
 
-  const currentVaultAddress = vaultAddresses[selectedChain] || DEFAULT_VAULT_ADDRESSES[selectedChain];
+  const currentVaultAddress = vaultAddresses[selectedChain] || DEFAULT_VAULT_ADDRESSES[selectedChain] || SUPPORTED_USDT_CHAINS[selectedChain]?.defaultVaultAddress;
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(currentVaultAddress)}`;
 
   const handleCopy = () => {
@@ -67,17 +71,19 @@ export default function Web3UsdtTransferModal({
     setIsEditingAddress(false);
   };
 
-  const handleVerifyOnChainDeposit = () => {
+  const handleVerifyOnChainDeposit = async () => {
     setIsVerifying(true);
-    setTimeout(() => {
-      setIsVerifying(false);
+    const res = await sendWeb3UsdtTransfer(selectedChain, usdtCost, currentVaultAddress);
+    setIsVerifying(false);
+    if (res.success) {
+      setTxHashResult(res.txHash);
       setIsCompleted(true);
       setTimeout(() => {
         onTransferSuccess();
         setIsCompleted(false);
         onClose();
-      }, 2200);
-    }, 2500);
+      }, 2500);
+    }
   };
 
   return (
@@ -134,10 +140,11 @@ export default function Web3UsdtTransferModal({
                 </button>
               </div>
 
-              <div className="grid grid-cols-5 gap-1.5 text-xs font-bold">
-                {(['ETH', 'BSC', 'POLYGON', 'ARBITRUM', 'SOLANA'] as const).map((chain) => (
+              <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5 text-xs font-bold">
+                {(Object.keys(SUPPORTED_USDT_CHAINS) as SupportedChainKey[]).map((chain) => (
                   <button
                     key={chain}
+                    type="button"
                     onClick={() => {
                       setSelectedChain(chain);
                       setIsEditingAddress(false);

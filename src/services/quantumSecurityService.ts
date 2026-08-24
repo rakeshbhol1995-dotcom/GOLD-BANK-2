@@ -3,7 +3,6 @@
  * Implements Post-Quantum Resistance against Shor's and Grover's Algorithms.
  */
 
-import { crypto } from 'globalthis/implementation';
 
 /**
  * Quantum-Resistant 512-Bit Key Derivation Function (Grover-Resistant 256-bit PQC Security Level)

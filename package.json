@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@openzeppelin/contracts": "^5.6.1",
     "@types/canvas-confetti": "^1.9.0",
     "@types/three": "^0.185.4",
     "canvas-confetti": "^1.9.4",
@@ -23,12 +24,15 @@
     "three": "^0.185.1"
   },
   "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
+    "hardhat": "^2.29.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

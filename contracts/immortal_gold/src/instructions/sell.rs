@@ -1,54 +1,58 @@
-use anchor_lang::solana_program::{program::invoke_signed, system_instruction};
+use anchor_lang::prelude::*;
+use anchor_spl::token::{self, Burn, Mint, Token, TokenAccount, Transfer};
+use crate::state::{ProtocolConfig, UserAccount};
+use crate::errors::ImmortalGoldError;
+use crate::math::{calculate_sell_breakdown, DIVIDEND_PRECISION};
+use crate::instructions::admin::{SellEvent, ReserveHealthEvent};
 
 #[derive(Accounts)]
 pub struct SellTokens<'info> {
     #[account(mut)]
     pub seller: Signer<'info>,
 
-    #[account(
-        mut,
-        seeds = [b"protocol_config"],
-        bump
-    )]
+    #[account(mut, seeds = [b"protocol_config"], bump)]
     pub protocol_config: Account<'info, ProtocolConfig>,
 
-    #[account(
-        mut,
-        seeds = [b"user_account", seller.key().as_ref()],
-        bump
-    )]
+    #[account(mut, seeds = [b"user_account", seller.key().as_ref()], bump)]
     pub user_account: Account<'info, UserAccount>,
 
     #[account(
         mut,
-        seeds = [b"vault_reserve"],
-        bump = protocol_config.vault_bump
+        constraint = seller_usdt_account.owner == seller.key(),
+        constraint = seller_usdt_account.mint == protocol_config.usdt_mint @ ImmortalGoldError::UnauthorizedMint
     )]
-    /// CHECK: Main Vault PDA releasing 90% payout & transferring fees
-    pub vault_reserve: SystemAccount<'info>,
+    pub seller_usdt_account: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        seeds = [b"vault_reserve"],
+        bump = protocol_config.vault_bump,
+        constraint = vault_reserve.mint == protocol_config.usdt_mint @ ImmortalGoldError::UnauthorizedMint
+    )]
+    pub vault_reserve: Account<'info, TokenAccount>,
 
     #[account(
         mut,
         seeds = [b"locked_reserve"],
-        bump = protocol_config.locked_vault_bump
+        bump = protocol_config.locked_vault_bump,
+        constraint = locked_reserve.mint == protocol_config.usdt_mint @ ImmortalGoldError::UnauthorizedMint
     )]
-    /// CHECK: Immutable Permanent Locked Reserve PDA holding 8% ratchet lock funds
-    pub locked_reserve: SystemAccount<'info>,
+    pub locked_reserve: Account<'info, TokenAccount>,
 
     #[account(
         mut,
         seeds = [b"dividend_vault"],
-        bump = protocol_config.dividend_vault_bump
+        bump = protocol_config.dividend_vault_bump,
+        constraint = dividend_vault.mint == protocol_config.usdt_mint @ ImmortalGoldError::UnauthorizedMint
     )]
-    /// CHECK: Separate Dividend Vault PDA holding 1% holder dividend fees
-    pub dividend_vault: SystemAccount<'info>,
+    pub dividend_vault: Account<'info, TokenAccount>,
 
     #[account(
         mut,
-        constraint = admin_treasury.key() == protocol_config.admin_treasury @ ImmortalGoldError::UnauthorizedTreasury
+        constraint = admin_treasury.key() == protocol_config.admin_treasury @ ImmortalGoldError::UnauthorizedTreasury,
+        constraint = admin_treasury.mint == protocol_config.usdt_mint @ ImmortalGoldError::UnauthorizedMint
     )]
-    /// CHECK: Admin Treasury wallet receiving 1% sell fee (validated against protocol_config)
-    pub admin_treasury: UncheckedAccount<'info>,
+    pub admin_treasury: Account<'info, TokenAccount>,
 
     #[account(
         mut,
@@ -63,174 +67,147 @@ pub struct SellTokens<'info> {
     )]
     pub seller_token_account: Account<'info, TokenAccount>,
 
-    pub token_program: Program<'info, Token>,
+    pub token_program:  Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
 
 pub fn handler(ctx: Context<SellTokens>, amount_to_sell: u64, min_payout_limit: u64) -> Result<()> {
     let config = &mut ctx.accounts.protocol_config;
-    require!(!config.is_paused, ImmortalGoldError::ProtocolPaused);
-    require!(amount_to_sell > 0, ImmortalGoldError::InvalidAmount);
-    require!(config.total_supply >= amount_to_sell, ImmortalGoldError::InvalidAmount);
+    require!(!config.is_paused,                              ImmortalGoldError::ProtocolPaused);
+    require!(amount_to_sell > 0,                             ImmortalGoldError::InvalidAmount);
+    require!(config.total_supply >= amount_to_sell,          ImmortalGoldError::InvalidAmount);
 
-    let seller_spl_balance = ctx.accounts.seller_token_account.amount;
-    require!(seller_spl_balance >= amount_to_sell, ImmortalGoldError::InvalidAmount);
+    let seller_bal = ctx.accounts.seller_token_account.amount;
+    require!(seller_bal >= amount_to_sell,                   ImmortalGoldError::InvalidAmount);
 
-    // Calculate 10% Asymmetric Sell Fee Breakdown
-    let breakdown = calculate_sell_breakdown(
-        config.total_supply,
-        config.vault_reserve,
-        amount_to_sell
-    )?;
+    // Use u128 vault_reserve (no overflow at large volumes)
+    let bd = calculate_sell_breakdown(config.total_supply, config.vault_reserve, amount_to_sell)?;
+    require!(bd.seller_payout >= min_payout_limit,           ImmortalGoldError::SlippageExceeded);
 
-    require!(breakdown.seller_payout >= min_payout_limit, ImmortalGoldError::SlippageExceeded);
+    // Physical solvency check
+    let physical = ctx.accounts.vault_reserve.amount as u128;
+    require!(physical >= config.vault_reserve,               ImmortalGoldError::VaultSolvencyBreach);
 
-    let user_account = &mut ctx.accounts.user_account;
+    let user = &mut ctx.accounts.user_account;
 
-    // 1. Accrue Pending Dividends before balance update
-    if seller_spl_balance > 0 {
-        let accumulated = (seller_spl_balance as u128)
-            .checked_mul(config.acc_dividend_per_share)
-            .ok_or(ImmortalGoldError::MathOverflow)?;
-
-        let pending = accumulated.checked_sub(user_account.reward_debt)
-            .unwrap_or(0) / DIVIDEND_PRECISION;
-
-        user_account.pending_rewards = user_account.pending_rewards.checked_add(pending as u64)
-            .ok_or(ImmortalGoldError::MathOverflow)?;
+    // Accrue pending dividends before burn
+    if seller_bal > 0 {
+        let acc     = (seller_bal as u128)
+            .checked_mul(config.acc_dividend_per_share).ok_or(ImmortalGoldError::MathOverflow)?;
+        let pending = acc.saturating_sub(user.reward_debt) / DIVIDEND_PRECISION;
+        user.pending_rewards = user.pending_rewards.checked_add(pending as u64).ok_or(ImmortalGoldError::MathOverflow)?;
     }
 
-    // 2. BURN 100% of sold $IMG Tokens via CPI
-    let cpi_accounts = Burn {
-        mint: ctx.accounts.img_mint.to_account_info(),
-        from: ctx.accounts.seller_token_account.to_account_info(),
-        authority: ctx.accounts.seller.to_account_info(),
-    };
-    let cpi_ctx = CpiContext::new(
-        ctx.accounts.token_program.to_account_info(),
-        cpi_accounts,
-    );
-    token::burn(cpi_ctx, amount_to_sell)?;
+    // ── 1. BURN $IMG ─────────────────────────────────────────────────────────
+    token::burn(
+        CpiContext::new(ctx.accounts.token_program.to_account_info(),
+            Burn {
+                mint:      ctx.accounts.img_mint.to_account_info(),
+                from:      ctx.accounts.seller_token_account.to_account_info(),
+                authority: ctx.accounts.seller.to_account_info(),
+            }),
+        amount_to_sell,
+    )?;
 
     let vault_bump = config.vault_bump;
-    let vault_signer_seeds = &[b"vault_reserve".as_ref(), &[vault_bump]];
-    let signer = &[&vault_signer_seeds[..]];
+    let seeds      = &[b"vault_reserve".as_ref(), &[vault_bump]];
+    let signer     = &[&seeds[..]];
 
-    // 3. Process 90% Payout Transfer from Vault PDA to Seller via CPI System Transfer
-    invoke_signed(
-        &system_instruction::transfer(
-            &ctx.accounts.vault_reserve.key(),
-            &ctx.accounts.seller.key(),
-            breakdown.seller_payout,
-        ),
-        &[
-            ctx.accounts.vault_reserve.to_account_info(),
-            ctx.accounts.seller.to_account_info(),
-            ctx.accounts.system_program.to_account_info(),
-        ],
-        signer,
+    // ── 2. 90% → Seller ──────────────────────────────────────────────────────
+    token::transfer(
+        CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from:      ctx.accounts.vault_reserve.to_account_info(),
+                to:        ctx.accounts.seller_usdt_account.to_account_info(),
+                authority: ctx.accounts.vault_reserve.to_account_info(),
+            }, signer),
+        bd.seller_payout,
     )?;
 
-    // 4. Transfer 1% Admin Treasury Fee from Vault via CPI
-    if breakdown.treasury_fee > 0 {
-        invoke_signed(
-            &system_instruction::transfer(
-                &ctx.accounts.vault_reserve.key(),
-                &ctx.accounts.admin_treasury.key(),
-                breakdown.treasury_fee,
-            ),
-            &[
-                ctx.accounts.vault_reserve.to_account_info(),
-                ctx.accounts.admin_treasury.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-            ],
-            signer,
+    // ── 3. 1% → Treasury ─────────────────────────────────────────────────────
+    if bd.treasury_fee > 0 {
+        token::transfer(
+            CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from:      ctx.accounts.vault_reserve.to_account_info(),
+                    to:        ctx.accounts.admin_treasury.to_account_info(),
+                    authority: ctx.accounts.vault_reserve.to_account_info(),
+                }, signer),
+            bd.treasury_fee,
         )?;
     }
 
-    // 5. Transfer 1% Dividend Fee from Main Vault directly into Separate Dividend Vault PDA via CPI
-    if breakdown.dividend_fee > 0 {
-        invoke_signed(
-            &system_instruction::transfer(
-                &ctx.accounts.vault_reserve.key(),
-                &ctx.accounts.dividend_vault.key(),
-                breakdown.dividend_fee,
-            ),
-            &[
-                ctx.accounts.vault_reserve.to_account_info(),
-                ctx.accounts.dividend_vault.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-            ],
-            signer,
+    // ── 4. 1% → Dividend Vault ───────────────────────────────────────────────
+    if bd.dividend_fee > 0 {
+        token::transfer(
+            CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from:      ctx.accounts.vault_reserve.to_account_info(),
+                    to:        ctx.accounts.dividend_vault.to_account_info(),
+                    authority: ctx.accounts.vault_reserve.to_account_info(),
+                }, signer),
+            bd.dividend_fee,
         )?;
 
-        config.dividend_pool_balance = config.dividend_pool_balance.checked_add(breakdown.dividend_fee)
-            .ok_or(ImmortalGoldError::MathOverflow)?;
+        config.dividend_pool_balance = config.dividend_pool_balance
+            .checked_add(bd.dividend_fee as u128).ok_or(ImmortalGoldError::MathOverflow)?;
 
-        let remaining_supply = config.total_supply.checked_sub(amount_to_sell)
-            .ok_or(ImmortalGoldError::MathOverflow)?;
-
-        if remaining_supply > 0 {
-            let dividend_addition = (breakdown.dividend_fee as u128)
-                .checked_mul(DIVIDEND_PRECISION)
-                .ok_or(ImmortalGoldError::MathOverflow)?
-                .checked_div(remaining_supply as u128)
-                .ok_or(ImmortalGoldError::MathOverflow)?;
-
-            config.acc_dividend_per_share = config.acc_dividend_per_share.checked_add(dividend_addition)
-                .ok_or(ImmortalGoldError::MathOverflow)?;
+        let remaining = config.total_supply.checked_sub(amount_to_sell).ok_or(ImmortalGoldError::MathOverflow)?;
+        if remaining > 0 {
+            let add = (bd.dividend_fee as u128)
+                .checked_mul(DIVIDEND_PRECISION).ok_or(ImmortalGoldError::MathOverflow)?
+                / (remaining as u128);
+            config.acc_dividend_per_share = config.acc_dividend_per_share
+                .checked_add(add).ok_or(ImmortalGoldError::MathOverflow)?;
         }
     }
 
-    // 6. Transfer 8% Permanent Ratchet Lock from Main Vault to Immutable Locked Reserve PDA via CPI
-    if breakdown.vault_ratchet_lock > 0 {
-        invoke_signed(
-            &system_instruction::transfer(
-                &ctx.accounts.vault_reserve.key(),
-                &ctx.accounts.locked_reserve.key(),
-                breakdown.vault_ratchet_lock,
-            ),
-            &[
-                ctx.accounts.vault_reserve.to_account_info(),
-                ctx.accounts.locked_reserve.to_account_info(),
-                ctx.accounts.system_program.to_account_info(),
-            ],
-            signer,
+    // ── 5. 8% → Locked Ratchet Reserve ───────────────────────────────────────
+    if bd.vault_ratchet_lock > 0 {
+        token::transfer(
+            CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from:      ctx.accounts.vault_reserve.to_account_info(),
+                    to:        ctx.accounts.locked_reserve.to_account_info(),
+                    authority: ctx.accounts.vault_reserve.to_account_info(),
+                }, signer),
+            bd.vault_ratchet_lock,
         )?;
     }
 
-    // State Updates
-    config.total_supply = config.total_supply.checked_sub(amount_to_sell)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
+    // ── State Updates ─────────────────────────────────────────────────────────
+    config.total_supply = config.total_supply.checked_sub(amount_to_sell).ok_or(ImmortalGoldError::MathOverflow)?;
+    config.ratchet_locked_reserve = config.ratchet_locked_reserve
+        .checked_add(bd.vault_ratchet_lock as u128).ok_or(ImmortalGoldError::MathOverflow)?;
 
-    // Record permanently locked 8% ratchet reserve balance in state
-    config.ratchet_locked_reserve = config.ratchet_locked_reserve.checked_add(breakdown.vault_ratchet_lock)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
+    let total_deducted = (bd.seller_payout as u128)
+        .checked_add(bd.treasury_fee as u128).ok_or(ImmortalGoldError::MathOverflow)?
+        .checked_add(bd.dividend_fee as u128).ok_or(ImmortalGoldError::MathOverflow)?
+        .checked_add(bd.vault_ratchet_lock as u128).ok_or(ImmortalGoldError::MathOverflow)?;
+    config.vault_reserve = config.vault_reserve.checked_sub(total_deducted)
+        .ok_or(ImmortalGoldError::InsufficientVaultLiquidity)?;
 
-    // Vault reserve is reduced by net seller payout, treasury fee, dividend fee, and ratchet lock transfer
-    config.vault_reserve = config.vault_reserve.checked_sub(breakdown.seller_payout)
-        .ok_or(ImmortalGoldError::InsufficientVaultLiquidity)?
-        .checked_sub(breakdown.treasury_fee)
-        .ok_or(ImmortalGoldError::MathOverflow)?
-        .checked_sub(breakdown.dividend_fee)
-        .ok_or(ImmortalGoldError::MathOverflow)?
-        .checked_sub(breakdown.vault_ratchet_lock)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
+    // Post-sell solvency guard
+    let phys_after = ctx.accounts.vault_reserve.amount as u128;
+    require!(phys_after >= config.vault_reserve, ImmortalGoldError::VaultSolvencyBreach);
 
-    let remaining_spl_balance = seller_spl_balance.checked_sub(amount_to_sell)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
+    let rem_bal = seller_bal.checked_sub(amount_to_sell).ok_or(ImmortalGoldError::MathOverflow)?;
+    user.reward_debt = (rem_bal as u128)
+        .checked_mul(config.acc_dividend_per_share).ok_or(ImmortalGoldError::MathOverflow)?;
 
-    user_account.reward_debt = (remaining_spl_balance as u128)
-        .checked_mul(config.acc_dividend_per_share)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
-
-    emit!(crate::instructions::admin::SellEvent {
-        seller: ctx.accounts.seller.key(),
-        amount_sold: amount_to_sell,
-        seller_payout: breakdown.seller_payout,
+    emit!(ReserveHealthEvent {
+        vault_reserve: config.vault_reserve,
+        total_supply:  config.total_supply,
+        timestamp:     Clock::get()?.unix_timestamp,
+    });
+    emit!(SellEvent {
+        seller:        ctx.accounts.seller.key(),
+        amount_sold:   amount_to_sell,
+        seller_payout: bd.seller_payout,
         burned_amount: amount_to_sell,
     });
 
-    msg!("Sold & BURNED {} $IMG tokens. Payout: {} micro-units. Price floor ratcheted UP!", amount_to_sell, breakdown.seller_payout);
+    msg!("Sold & burned {} $IMG. Payout: {} micro-USDT. Reserve: {} micro-USDT.",
+        amount_to_sell, bd.seller_payout, config.vault_reserve);
     Ok(())
 }

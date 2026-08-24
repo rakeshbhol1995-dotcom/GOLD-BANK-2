@@ -89,7 +89,7 @@ export default function MintModal({
 
           <div className="flex justify-between items-center pt-2 border-t border-zinc-800">
             <span className="text-zinc-400">{txType === 'buy' ? 'Total Paid Cost:' : 'Net Seller Payout:'}</span>
-            <span className="font-bold text-emerald-400 text-sm">${costOrPayout.toFixed(4)} USDC</span>
+            <span className="font-bold text-emerald-400 text-sm">${costOrPayout.toFixed(4)} USDT</span>
           </div>
         </div>
 
@@ -98,7 +98,7 @@ export default function MintModal({
           <button
             onClick={() => {
               onClose();
-              onViewCertificate();
+              if (onViewCertificate) onViewCertificate();
             }}
             className="w-full py-3 rounded-xl bg-gold-gradient text-black font-semibold text-sm shadow-lg shadow-yellow-500/20 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2"
           >

@@ -3,6 +3,8 @@
 import React, { useState } from 'react';
 import { X, Wallet, Copy, Check, QrCode, Send, ArrowRight, ShieldCheck, CheckCircle2, RefreshCw, Smartphone } from 'lucide-react';
 
+import { SUPPORTED_USDT_CHAINS, SupportedChainKey, sendWeb3UsdtTransfer } from '@/services/multiChainUsdtService';
+
 interface UsdtWalletModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -23,7 +25,7 @@ export default function UsdtWalletModal({
   onClaimDemoUsdt
 }: UsdtWalletModalProps) {
   const [activeTab, setActiveTab] = useState<'SEND' | 'RECEIVE'>(initialMode);
-  const [selectedChain, setSelectedChain] = useState<'SOLANA' | 'BSC' | 'ETH' | 'POLYGON' | 'ARBITRUM'>('SOLANA');
+  const [selectedChain, setSelectedChain] = useState<SupportedChainKey>('SOLANA');
   const [recipient, setRecipient] = useState('');
   const [amount, setAmount] = useState<number>(50.0);
   const [copied, setCopied] = useState(false);
@@ -132,13 +134,13 @@ export default function UsdtWalletModal({
                 {/* Chain Selector */}
                 <div className="space-y-1">
                   <label className="text-xs font-semibold text-zinc-300">Select Network:</label>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {(['SOLANA', 'BSC', 'ETH', 'POLYGON', 'ARBITRUM'] as const).map((chain) => (
+                  <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 text-[9px]">
+                    {(Object.keys(SUPPORTED_USDT_CHAINS) as SupportedChainKey[]).map((chain) => (
                       <button
                         key={chain}
                         type="button"
                         onClick={() => setSelectedChain(chain)}
-                        className={`py-2 px-2 rounded-lg text-[10px] font-mono font-bold border transition-all ${
+                        className={`py-1.5 px-1 rounded-lg font-mono font-bold border transition-all text-center ${
                           selectedChain === chain
                             ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
                             : 'bg-black/40 border-zinc-800 text-zinc-400 hover:border-zinc-700'
@@ -209,13 +211,13 @@ export default function UsdtWalletModal({
             {activeTab === 'RECEIVE' && (
               <div className="space-y-4 text-center animate-fade-in">
                 {/* Chain Selector */}
-                <div className="grid grid-cols-3 gap-1.5 text-left">
-                  {(['SOLANA', 'BSC', 'ETH', 'POLYGON', 'ARBITRUM'] as const).map((chain) => (
+                <div className="grid grid-cols-4 sm:grid-cols-7 gap-1 text-left text-[9px]">
+                  {(Object.keys(SUPPORTED_USDT_CHAINS) as SupportedChainKey[]).map((chain) => (
                     <button
                       key={chain}
                       type="button"
                       onClick={() => setSelectedChain(chain)}
-                      className={`py-2 px-2 rounded-lg text-[10px] font-mono font-bold border transition-all ${
+                      className={`py-1.5 px-1 rounded-lg font-mono font-bold border transition-all text-center ${
                         selectedChain === chain
                           ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
                           : 'bg-black/40 border-zinc-800 text-zinc-400 hover:border-zinc-700'

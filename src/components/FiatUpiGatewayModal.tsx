@@ -184,6 +184,10 @@ export default function FiatUpiGatewayModal({
                 <span className="text-zinc-400">USDT Equivalent:</span>
                 <span className="font-mono text-zinc-300">${usdtCost.toFixed(2)} USDT</span>
               </div>
+              <div className="flex justify-between items-center text-xs text-emerald-400">
+                <span>Gateway Charge:</span>
+                <span className="font-bold">₹0.00 INR (0% Fee)</span>
+              </div>
               <div className="flex justify-between items-center text-xs border-t border-zinc-800 pt-2">
                 <span className="text-zinc-300 font-bold">Total Amount Payable:</span>
                 <span className="text-xl font-black text-emerald-400">₹{inrCost.toLocaleString('en-IN')} INR</span>

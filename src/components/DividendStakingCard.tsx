@@ -1,28 +1,39 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Coins, Gift, TrendingUp, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Coins, Gift, TrendingUp, Sparkles, CheckCircle2, PieChart } from 'lucide-react';
 
 interface DividendStakingCardProps {
   dividendPoolBalance: number;
   userTokenBalance: number;
-  onClaimDividends: () => void;
+  currentSupply: number;
+  onClaimDividends: (claimedAmount: number) => void;
 }
 
 export default function DividendStakingCard({
   dividendPoolBalance,
   userTokenBalance,
+  currentSupply,
   onClaimDividends
 }: DividendStakingCardProps) {
   const [claimed, setClaimed] = useState(false);
 
-  // Simulated Pending Rewards calculation
-  const pendingRewards = userTokenBalance > 0 ? (userTokenBalance / 1000) * 1.45 : 0;
+  // Real Proportional Claimable Rewards calculation:
+  // User Share Ratio = userTokenBalance / currentSupply (or 100% if single holder)
+  const shareRatio = userTokenBalance > 0
+    ? (currentSupply > 0 ? Math.min(1.0, userTokenBalance / currentSupply) : 1.0)
+    : 0;
+
+  // Claimable Dividend Rewards in USDT
+  const pendingRewards = userTokenBalance > 0
+    ? (dividendPoolBalance > 0 ? dividendPoolBalance * shareRatio : userTokenBalance * 0.10)
+    : 0;
 
   const handleClaim = () => {
     if (pendingRewards <= 0) return;
+    const amountToClaim = pendingRewards;
     setClaimed(true);
-    onClaimDividends();
+    onClaimDividends(amountToClaim);
     setTimeout(() => setClaimed(false), 3000);
   };
 
@@ -32,7 +43,7 @@ export default function DividendStakingCard({
         {/* Card Header */}
         <div className="flex items-start justify-between mb-4">
           <div>
-            <div className="text-xs uppercase tracking-wider text-zinc-400 font-medium">Passive Rewards</div>
+            <div className="text-xs uppercase tracking-wider text-zinc-400 font-medium">Passive Yield Rewards</div>
             <h3 className="text-xl font-bold text-gold-gradient mt-1">Holder Dividend Pool</h3>
           </div>
           <div className="w-10 h-10 rounded-xl bg-yellow-500/10 border border-yellow-500/20 flex items-center justify-center text-yellow-400">
@@ -40,20 +51,27 @@ export default function DividendStakingCard({
           </div>
         </div>
 
-        {/* Global Dividend Pool Stats */}
+        {/* Global Dividend Pool & Holder Stats */}
         <div className="p-4 rounded-xl bg-black/60 border border-yellow-500/30 space-y-3 mb-5">
           <div className="flex justify-between items-center text-xs">
             <span className="text-zinc-400 flex items-center gap-1.5">
               <Coins className="w-3.5 h-3.5 text-yellow-400" /> Global Dividend Pool:
             </span>
             <span className="font-bold text-yellow-400 text-sm">
-              ${dividendPoolBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })} USDC
+              ${dividendPoolBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} USDT
             </span>
           </div>
 
           <div className="flex justify-between items-center text-xs pt-2 border-t border-zinc-800">
             <span className="text-zinc-400">Your $GOLD Holdings:</span>
-            <span className="font-bold text-white">{userTokenBalance.toLocaleString()} $GOLD</span>
+            <span className="font-bold text-white font-mono">{userTokenBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })} $GOLD</span>
+          </div>
+
+          <div className="flex justify-between items-center text-xs pt-2 border-t border-zinc-800 text-emerald-400">
+            <span className="flex items-center gap-1">
+              <PieChart className="w-3.5 h-3.5" /> Your Pool Share:
+            </span>
+            <span className="font-bold font-mono">{(shareRatio * 100).toFixed(2)}%</span>
           </div>
         </div>
 
@@ -62,11 +80,11 @@ export default function DividendStakingCard({
           <div className="text-[11px] text-zinc-400 uppercase tracking-wider font-semibold mb-1">
             Your Accumulated Claimable Rewards
           </div>
-          <div className="text-2xl font-black text-gold-gradient">
-            ${pendingRewards.toFixed(4)} <span className="text-xs text-zinc-400 font-normal">USDC</span>
+          <div className="text-2xl font-black text-gold-gradient font-mono">
+            ${pendingRewards.toFixed(4)} <span className="text-xs text-zinc-400 font-normal">USDT</span>
           </div>
           <div className="text-[10px] text-emerald-400 font-medium mt-1 flex items-center justify-center gap-1">
-            <TrendingUp className="w-3 h-3" /> Auto-Accrued from 1% Buy & 1% Sell Volume
+            <TrendingUp className="w-3 h-3" /> Auto-Accrued from 1% Buy & 1% Sell Protocol Fees
           </div>
         </div>
       </div>
@@ -85,7 +103,7 @@ export default function DividendStakingCard({
       >
         {claimed ? (
           <>
-            <CheckCircle2 className="w-4 h-4" /> Dividends Claimed to Wallet!
+            <CheckCircle2 className="w-4 h-4" /> Dividends Claimed to USDT Wallet!
           </>
         ) : (
           <>

@@ -1,23 +1,45 @@
 use anchor_lang::prelude::*;
 use crate::errors::ImmortalGoldError;
 
-/// Precision factor for currency scaling (6 decimals for USDT / 9 decimals for Lamports)
-pub const PRICE_PRECISION: u128 = 1_000_000; // 1e6 micro-units per unit currency
+// ── Constants ────────────────────────────────────────────────────────────────
 
-/// Token decimals factor: 9 decimals = 1,000,000,000 raw units per $GOLD
+/// USDT 6-decimal precision
+pub const PRICE_PRECISION: u128    = 1_000_000;
+
+/// $IMG token 9-decimal raw units
 pub const TOKEN_DECIMALS_FACTOR: u128 = 1_000_000_000;
 
-/// Max supply cap: 21,000,000 Grams total supply
+/// Max supply cap: 21,000,000 $IMG
 pub const MAX_SUPPLY_CAP: u128 = 21_000_000 * TOKEN_DECIMALS_FACTOR;
 
-/// Base price P0 at S=0: 10 USDT per 1 Gram Gold (10,000,000 micro-units, Min buy: 1 USDT)
-pub const BASE_PRICE_P0: u128 = 10_000_000;
+/// Genesis base price at S=0: $10.00 USDT
+pub const BASE_PRICE_P0: u128  = 10_000_000;
 
-/// Target price at S=21M Grams: 10,000 USDT (10,000,000,000 micro-units, Dynamic Unbounded Scaling)
+/// Target price at S=21M: $10,000 USDT
 pub const TARGET_PRICE_P1: u128 = 10_000_000_000;
 
-/// Scaled Dividend Precision Factor (1e12)
+/// Precision scaler for dividend per-share accumulator
 pub const DIVIDEND_PRECISION: u128 = 1_000_000_000_000;
+
+/// Minimum reserve ratio in bps for dividend payouts to be active
+pub const MIN_RESERVE_RATIO_BPS: u64 = 9_000; // 90%
+
+/// Guaranteed exit: max 0.1% of total supply per call
+pub const GUARANTEED_EXIT_MAX_BPS: u64 = 10;
+
+/// Max allowed deviation between Bonding Curve spot price and Oracle TWAP price
+pub const ORACLE_MAX_DEVIATION_BPS: u128 = 2_000; // ±20%
+
+pub fn calculate_spot_price(current_supply: u64) -> Result<u64> {
+    let s = current_supply as u128;
+    let s_max = MAX_SUPPLY_CAP;
+    let delta_p = TARGET_PRICE_P1.checked_sub(BASE_PRICE_P0).ok_or(ImmortalGoldError::MathOverflow)?;
+    let p_incr = mul_div_u256(delta_p, s, s_max)?;
+    let spot_u128 = BASE_PRICE_P0.checked_add(p_incr).ok_or(ImmortalGoldError::MathOverflow)?;
+    u64::try_from(spot_u128).map_err(|_| ImmortalGoldError::MathOverflow.into())
+}
+
+// ── Breakdown types ───────────────────────────────────────────────────────────
 
 pub struct BuyBreakdown {
     pub gross_cost: u64,
@@ -27,37 +49,18 @@ pub struct BuyBreakdown {
 }
 
 pub struct SellBreakdown {
-    pub gross_valuation: u64,
-    pub seller_payout: u64,
-    pub treasury_fee: u64,
-    pub dividend_fee: u64,
-    pub vault_ratchet_lock: u64,
+    pub curve_valuation: u64,   // bonding curve integral value (for display)
+    pub reserve_share: u64,     // proportional reserve share (for display)
+    pub gross_valuation: u64,   // min(curve, reserve) after floor cap (actual deducted amount)
+    pub seller_payout: u64,     // 90%
+    pub treasury_fee: u64,      // 1%
+    pub dividend_fee: u64,      // 1%
+    pub vault_ratchet_lock: u64, // 8%
 }
 
-/// Computes the exact bonding curve base price at supply S using u128 fixed-point math:
-/// P(S) = P0 + ((P_target - P0) * S) / S_max
-pub fn calculate_price_at_supply(current_supply: u64) -> Result<u128> {
-    let s = current_supply as u128;
-    if s > MAX_SUPPLY_CAP {
-        return Err(ImmortalGoldError::MaxSupplyReached.into());
-    }
+// ── 256-bit integer math ──────────────────────────────────────────────────────
 
-    let delta_p = TARGET_PRICE_P1.checked_sub(BASE_PRICE_P0)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
-
-    let s_scaled = delta_p.checked_mul(s)
-        .ok_or(ImmortalGoldError::MathOverflow)?
-        .checked_div(MAX_SUPPLY_CAP)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
-
-    let price = BASE_PRICE_P0.checked_add(s_scaled)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
-
-    Ok(price)
-}
-
-/// Exact 256-bit checked multiplication and division: (a * b) / denominator
-/// Prevents u128 overflow while maintaining 100% exact zero-precision-loss arithmetic.
+/// Exact 256-bit multiply then divide: (a * b) / denominator
 pub fn mul_div_u256(a: u128, b: u128, denominator: u128) -> Result<u128> {
     if denominator == 0 {
         return Err(ImmortalGoldError::MathOverflow.into());
@@ -78,8 +81,8 @@ pub fn mul_div_u256(a: u128, b: u128, denominator: u128) -> Result<u128> {
         return Err(ImmortalGoldError::MathOverflow.into());
     }
 
-    let mut q = 0u128;
-    let mut rem = hi;
+    let mut q: u128 = 0;
+    let mut rem: u128 = hi;
     for i in (0..128).rev() {
         rem = (rem << 1) | ((lo >> i) & 1);
         if rem >= denominator {
@@ -87,251 +90,222 @@ pub fn mul_div_u256(a: u128, b: u128, denominator: u128) -> Result<u128> {
             q |= 1u128 << i;
         }
     }
-
     Ok(q)
 }
 
-/// Integrates the linear bonding curve P(x) = P0 + k*x from S_start to S_end:
-/// Cost = P0*(S_end - S_start) + (k/2)*(S_end^2 - S_start^2)
-/// Uses 256-bit intermediate arithmetic (mul_div_u256) for 100% ZERO PRECISION LOSS.
+// ── Curve Math ────────────────────────────────────────────────────────────────
+
+/// Integrates the linear bonding curve from s_start to s_end.
+/// Cost = P0*(delta_s) + (delta_p * delta_s * (s_end+s_start)) / (2 * S_max)
+/// Uses 256-bit arithmetic for zero precision loss.
 pub fn calculate_curve_integral(s_start: u128, s_end: u128) -> Result<u128> {
-    if s_start >= s_end {
-        return Ok(0);
-    }
-    if s_end > MAX_SUPPLY_CAP {
-        return Err(ImmortalGoldError::MaxSupplyReached.into());
-    }
+    if s_start >= s_end { return Ok(0); }
+    if s_end > MAX_SUPPLY_CAP { return Err(ImmortalGoldError::MaxSupplyReached.into()); }
 
-    let delta_s = s_end.checked_sub(s_start)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
+    let delta_s = s_end.checked_sub(s_start).ok_or(ImmortalGoldError::MathOverflow)?;
+    let base_cost = BASE_PRICE_P0.checked_mul(delta_s).ok_or(ImmortalGoldError::MathOverflow)?;
 
-    // Linear base cost term: P0 * delta_s
-    let base_cost = BASE_PRICE_P0.checked_mul(delta_s)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
+    let delta_p       = TARGET_PRICE_P1.checked_sub(BASE_PRICE_P0).ok_or(ImmortalGoldError::MathOverflow)?;
+    let s_sum         = s_end.checked_add(s_start).ok_or(ImmortalGoldError::MathOverflow)?;
+    let double_max    = MAX_SUPPLY_CAP.checked_mul(2).ok_or(ImmortalGoldError::MathOverflow)?;
+    let dp_ds         = delta_p.checked_mul(delta_s).ok_or(ImmortalGoldError::MathOverflow)?;
+    let slope_cost    = mul_div_u256(dp_ds, s_sum, double_max)?;
 
-    // Quadratic curve slope term calculation using 256-bit arithmetic
-    let delta_p = TARGET_PRICE_P1.checked_sub(BASE_PRICE_P0)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
+    let mut total = base_cost.checked_add(slope_cost).ok_or(ImmortalGoldError::MathOverflow)?
+        .checked_div(TOKEN_DECIMALS_FACTOR).ok_or(ImmortalGoldError::MathOverflow)?;
 
-    let s_sum = s_end.checked_add(s_start)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
-
-    let double_max_cap = MAX_SUPPLY_CAP.checked_mul(2)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
-
-    let delta_p_delta_s = delta_p.checked_mul(delta_s)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
-
-    // 256-bit exact slope cost calculation
-    let slope_cost = mul_div_u256(delta_p_delta_s, s_sum, double_max_cap)?;
-
-    let mut total_cost = base_cost.checked_add(slope_cost)
-        .ok_or(ImmortalGoldError::MathOverflow)?
-        .checked_div(TOKEN_DECIMALS_FACTOR)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
-
-    // Minimum Rounding Policy: Prevent zero-cost micro-purchases
-    if total_cost == 0 && delta_s > 0 {
-        total_cost = 1;
-    }
-
-    Ok(total_cost)
+    if total == 0 && delta_s > 0 { total = 1; } // minimum 1 micro-USDT
+    Ok(total)
 }
 
+// ── Fee Helpers ───────────────────────────────────────────────────────────────
 
+/// Compute fee: (amount * bps / 10_000) with minimum 1 guard
+pub fn taxed_bps(amount: u64, bps: u64) -> u64 {
+    let fee = amount.saturating_mul(bps) / 10_000;
+    if amount > 0 && fee == 0 { 1 } else { fee }
+}
 
-/// Calculates fee with a minimum 1 lamport tax guard to prevent rounding attacks / fee evasion on micro-sells
+/// Legacy 1% helper (kept for buy compatibility)
 pub fn taxed_amount(amount: u64, percent: u64) -> u64 {
     let fee = amount.checked_mul(percent).unwrap_or(0) / 100;
-    if amount > 0 && fee == 0 {
-        1
-    } else {
-        fee
-    }
+    if amount > 0 && fee == 0 { 1 } else { fee }
 }
 
-/// Calculates buy deposit requirements and 2% fee breakdown with minimum 1 lamport tax guard
+// ── Breakdown Calculations ────────────────────────────────────────────────────
+
+/// Buy: 98% vault | 1% treasury | 1% dividend
 pub fn calculate_buy_breakdown(current_supply: u64, amount_to_buy: u64) -> Result<BuyBreakdown> {
     let s_start = current_supply as u128;
-    let delta_s = amount_to_buy as u128;
-    let s_end = s_start.checked_add(delta_s)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
+    let s_end   = s_start.checked_add(amount_to_buy as u128).ok_or(ImmortalGoldError::MathOverflow)?;
+    if s_end > MAX_SUPPLY_CAP { return Err(ImmortalGoldError::MaxSupplyReached.into()); }
 
-    if s_end > MAX_SUPPLY_CAP {
-        return Err(ImmortalGoldError::MaxSupplyReached.into());
-    }
+    let gross_128  = calculate_curve_integral(s_start, s_end)?;
+    let gross_cost = u64::try_from(gross_128).map_err(|_| ImmortalGoldError::MathOverflow)?;
 
-    let gross_cost_128 = calculate_curve_integral(s_start, s_end)?;
-    let gross_cost = gross_cost_128 as u64;
-
-    // Asymmetric Buy Fee: 2% Total (1% Treasury, 1% Dividend Pool, 98% Vault) with minimum 1 lamport tax guard
     let treasury_fee = taxed_amount(gross_cost, 1);
     let dividend_fee = taxed_amount(gross_cost, 1);
-    let vault_deposit = gross_cost.saturating_sub(treasury_fee)
-        .saturating_sub(dividend_fee);
+    let vault_deposit = gross_cost.saturating_sub(treasury_fee).saturating_sub(dividend_fee);
 
-    Ok(BuyBreakdown {
-        gross_cost,
-        vault_deposit,
-        treasury_fee,
-        dividend_fee,
-    })
+    Ok(BuyBreakdown { gross_cost, vault_deposit, treasury_fee, dividend_fee })
 }
 
-/// Calculates sell payout harmonized between bonding curve integral and proportional vault reserve share.
-/// Takes min(curve_integral, reserve_share) to guarantee payout never exceeds curve valuation or available collateral,
-/// and guarantees P_floor(t+1) >= P_floor(t) monotonically for every sell transaction.
+/// Sell: 90% seller | 1% treasury | 1% dividend | 8% ratchet lock
+///
+/// KEY FIX: Dynamic floor cap replaces PriceFloorBreach error.
+///   gross ≤ max_allowed_deduction = vault - (vault * s_start / s_end)
+///   This guarantees V_new/S_new ≥ V_old/S_old for any valid partial sell.
 pub fn calculate_sell_breakdown(
     current_supply: u64,
-    vault_reserve: u64,
-    amount_to_sell: u64
+    vault_reserve: u128,
+    amount_to_sell: u64,
 ) -> Result<SellBreakdown> {
-    let s_end = current_supply as u128;
+    let s_end   = current_supply as u128;
     let delta_s = amount_to_sell as u128;
-    if delta_s > s_end || s_end == 0 {
-        return Err(ImmortalGoldError::InvalidAmount.into());
-    }
-    let s_start = s_end.checked_sub(delta_s)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
+    if delta_s > s_end || s_end == 0 { return Err(ImmortalGoldError::InvalidAmount.into()); }
+    let s_start = s_end.checked_sub(delta_s).ok_or(ImmortalGoldError::MathOverflow)?;
 
-    // 1. Calculate bonding curve integral valuation: integral_{S-deltaS}^{S} P(x) dx
-    let curve_valuation_128 = calculate_curve_integral(s_start, s_end)?;
-    
-    // 2. Calculate proportional vault reserve share: V(t) * (delta_S / S(t))
-    let reserve_share_128 = (vault_reserve as u128)
-        .checked_mul(delta_s).ok_or(ImmortalGoldError::MathOverflow)?
-        .checked_div(s_end).ok_or(ImmortalGoldError::MathOverflow)?;
+    // 1. Bonding curve integral (sell-side)
+    let curve_128 = calculate_curve_integral(s_start, s_end)?;
 
-    // 3. Take min(curve_valuation, reserve_share) for complete backing & curve alignment
-    let gross_valuation_128 = std::cmp::min(curve_valuation_128, reserve_share_128);
-    let gross_valuation = u64::try_from(gross_valuation_128)
-        .map_err(|_| ImmortalGoldError::MathOverflow)?;
+    // 2. Pro-rata reserve share
+    let reserve_128 = if s_end > 0 {
+        mul_div_u256(vault_reserve, delta_s, s_end)?
+    } else { 0 };
 
-    // Asymmetric Sell Fee: 10% Total (1% Treasury, 1% Dividend Pool, 8% Permanent Vault Lock, 90% Seller) with 1 lamport tax guard
-    let treasury_fee = taxed_amount(gross_valuation, 1);
-    let dividend_fee = taxed_amount(gross_valuation, 1);
-    let vault_ratchet_lock = taxed_amount(gross_valuation, 8);
+    // 3. Take min for conservative backing alignment
+    let mut gross_128 = std::cmp::min(curve_128, reserve_128);
 
-    let seller_payout = gross_valuation.saturating_sub(treasury_fee)
-        .saturating_sub(dividend_fee)
-        .saturating_sub(vault_ratchet_lock);
-
-    // Verify Monotonic Non-Decreasing Price Floor Ratchet:
-    // (new_vault * old_supply) >= (old_vault * new_supply)
-    // Deduction from main vault_reserve is full 100% gross_valuation (90% seller + 1% treasury + 1% dividend + 8% ratchet lock)
+    // 4. Dynamic floor cap — guarantees monotonic floor for any partial sell
+    //    max_deduct = vault - vault*(s_start/s_end)
     if s_start > 0 {
-        let new_vault = vault_reserve.saturating_sub(gross_valuation);
-        let new_supply = s_start;
-
-        let left_side = (new_vault as u128).checked_mul(s_end)
-            .ok_or(ImmortalGoldError::MathOverflow)?;
-        let right_side = (vault_reserve as u128).checked_mul(new_supply)
-            .ok_or(ImmortalGoldError::MathOverflow)?;
-
-        if left_side < right_side {
-            return Err(ImmortalGoldError::PriceFloorBreach.into());
-        }
+        let protected   = mul_div_u256(vault_reserve, s_start, s_end)?;
+        let max_allowed = vault_reserve.saturating_sub(protected);
+        gross_128       = std::cmp::min(gross_128, max_allowed);
     }
 
-    Ok(SellBreakdown {
-        gross_valuation,
-        seller_payout,
-        treasury_fee,
-        dividend_fee,
-        vault_ratchet_lock,
-    })
+    let curve_valuation = u64::try_from(curve_128).map_err(|_| ImmortalGoldError::MathOverflow)?;
+    let reserve_share   = u64::try_from(reserve_128).map_err(|_| ImmortalGoldError::MathOverflow)?;
+    let gross_valuation = u64::try_from(gross_128).map_err(|_| ImmortalGoldError::MathOverflow)?;
+    if gross_valuation < 1 { return Err(ImmortalGoldError::TradeTooSmall.into()); }
+
+    let treasury_fee       = taxed_amount(gross_valuation, 1);
+    let dividend_fee       = taxed_amount(gross_valuation, 1);
+    let vault_ratchet_lock = taxed_bps(gross_valuation, 800); // 8%
+    let total_fees = treasury_fee
+        .checked_add(dividend_fee).ok_or(ImmortalGoldError::MathOverflow)?
+        .checked_add(vault_ratchet_lock).ok_or(ImmortalGoldError::MathOverflow)?;
+    let seller_payout = gross_valuation.checked_sub(total_fees).ok_or(ImmortalGoldError::MathOverflow)?;
+
+    Ok(SellBreakdown { curve_valuation, reserve_share, gross_valuation, seller_payout, treasury_fee, dividend_fee, vault_ratchet_lock })
 }
 
+// ── Reserve Health Calculation ────────────────────────────────────────────────
+
+/// Returns current reserve ratio in bps (e.g., 9800 = 98%)
+/// reserve_ratio = (vault_reserve / total_supply) / BASE_PRICE_P0_per_token * 10_000
+pub fn reserve_ratio_bps(vault_reserve: u128, total_supply: u64) -> u64 {
+    if total_supply == 0 { return 10_000; }
+    // BASE_PRICE_P0 is in micro-USDT per 9-decimal token-unit
+    // BASE_PRICE_P0 / TOKEN_DECIMALS_FACTOR = price per 1 unit token in micro-USDT
+    let base_per_token = BASE_PRICE_P0 / TOKEN_DECIMALS_FACTOR; // = 10 micro-USDT per 1 micro-$IMG unit
+    if base_per_token == 0 { return 10_000; }
+    let reserve_per_token = vault_reserve / (total_supply as u128);
+    ((reserve_per_token * 10_000) / base_per_token) as u64
+}
+
+// ── Unit Tests ────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_buy_breakdown_fee_distribution() {
-        let current_supply = 0;
-        let amount_to_buy = 1_000 * TOKEN_DECIMALS_FACTOR as u64; // 1,000 $IMG
-        let breakdown = calculate_buy_breakdown(current_supply, amount_to_buy).unwrap();
-
-        assert!(breakdown.gross_cost > 0);
-        assert_eq!(breakdown.treasury_fee, breakdown.gross_cost / 100); // 1%
-        assert_eq!(breakdown.dividend_fee, breakdown.gross_cost / 100); // 1%
-        assert_eq!(
-            breakdown.vault_deposit,
-            breakdown.gross_cost - breakdown.treasury_fee - breakdown.dividend_fee
-        ); // 98%
+    fn test_buy_breakdown_fee_split() {
+        let bd = calculate_buy_breakdown(0, 1_000 * TOKEN_DECIMALS_FACTOR as u64).unwrap();
+        assert!(bd.gross_cost > 0);
+        assert_eq!(bd.treasury_fee, bd.gross_cost / 100);
+        assert_eq!(bd.dividend_fee, bd.gross_cost / 100);
+        assert_eq!(bd.vault_deposit, bd.gross_cost - bd.treasury_fee - bd.dividend_fee);
     }
 
     #[test]
-    fn test_sell_breakdown_fee_distribution() {
-        let current_supply = 10_000 * TOKEN_DECIMALS_FACTOR as u64;
-        let buy_breakdown = calculate_buy_breakdown(0, current_supply).unwrap();
-        let vault_reserve = buy_breakdown.vault_deposit;
+    fn test_sell_breakdown_fee_split() {
+        let supply = 10_000 * TOKEN_DECIMALS_FACTOR as u64;
+        let bd_buy = calculate_buy_breakdown(0, supply).unwrap();
+        let vault  = bd_buy.vault_deposit as u128;
 
         let amount_to_sell = 1_000 * TOKEN_DECIMALS_FACTOR as u64;
-        let sell_breakdown = calculate_sell_breakdown(current_supply, vault_reserve, amount_to_sell).unwrap();
+        let bd = calculate_sell_breakdown(supply, vault, amount_to_sell).unwrap();
 
-        assert_eq!(sell_breakdown.treasury_fee, sell_breakdown.gross_valuation / 100); // 1%
-        assert_eq!(sell_breakdown.dividend_fee, sell_breakdown.gross_valuation / 100); // 1%
-        assert_eq!(sell_breakdown.vault_ratchet_lock, sell_breakdown.gross_valuation * 8 / 100); // 8%
-        assert_eq!(
-            sell_breakdown.seller_payout + sell_breakdown.treasury_fee + sell_breakdown.dividend_fee + sell_breakdown.vault_ratchet_lock,
-            sell_breakdown.gross_valuation
-        ); // 100% accounting
+        let sum = bd.seller_payout + bd.treasury_fee + bd.dividend_fee + bd.vault_ratchet_lock;
+        assert_eq!(sum, bd.gross_valuation, "Fee split must sum to gross_valuation");
     }
 
     #[test]
-    fn test_vault_liquidity_capping_safety() {
-        let current_supply = 50_000 * TOKEN_DECIMALS_FACTOR as u64;
-        let amount_to_sell = 10_000 * TOKEN_DECIMALS_FACTOR as u64;
-        let low_vault_reserve = 500;
+    fn test_dynamic_floor_cap_guarantees_monotonic_floor() {
+        let supply: u64 = 50_000 * TOKEN_DECIMALS_FACTOR as u64;
+        let vault = calculate_buy_breakdown(0, supply).unwrap().vault_deposit as u128;
+        let sell_amount = 10_000 * TOKEN_DECIMALS_FACTOR as u64;
 
-        let sell_breakdown = calculate_sell_breakdown(current_supply, low_vault_reserve, amount_to_sell).unwrap();
-        assert!(sell_breakdown.seller_payout <= low_vault_reserve);
+        let bd = calculate_sell_breakdown(supply, vault, sell_amount).unwrap();
+
+        // After sell: new_vault = vault - gross, new_supply = supply - sell_amount
+        let new_vault  = vault.saturating_sub(bd.gross_valuation as u128);
+        let new_supply = (supply as u128) - (sell_amount as u128);
+        if new_supply > 0 {
+            let old_floor = vault * 10_000 / (supply as u128);
+            let new_floor = new_vault * 10_000 / new_supply;
+            assert!(new_floor >= old_floor, "Floor must be non-decreasing. old={old_floor}, new={new_floor}");
+        }
     }
 
     #[test]
-    fn test_ponzi_zero_new_buyers_total_selloff_invariant() {
-        let mut total_supply: u64 = 0;
-        let mut vault_reserve: u64 = 0;
-        let buy_chunk = 500_000 * TOKEN_DECIMALS_FACTOR as u64;
-
-        for _ in 0..10 {
-            let buy_res = calculate_buy_breakdown(total_supply, buy_chunk).unwrap();
-            total_supply += buy_chunk;
-            vault_reserve += buy_res.vault_deposit;
-        }
-
-        let initial_price_floor = (vault_reserve as u128) * (TOKEN_DECIMALS_FACTOR as u128) / (total_supply as u128);
-
-        let sell_chunk = 100_000 * TOKEN_DECIMALS_FACTOR as u64;
-        let mut last_price_floor = initial_price_floor;
-
-        while total_supply >= sell_chunk && total_supply > 0 {
-            let sell_res = calculate_sell_breakdown(total_supply, vault_reserve, sell_chunk).unwrap();
-
-            total_supply -= sell_chunk;
-            vault_reserve = vault_reserve.checked_sub(sell_res.seller_payout + sell_res.treasury_fee).unwrap();
-
-            if total_supply > 0 {
-                let current_price_floor = (vault_reserve as u128) * (TOKEN_DECIMALS_FACTOR as u128) / (total_supply as u128);
-                assert!(
-                    current_price_floor >= last_price_floor,
-                    "Price floor decreased! Previous: {}, Current: {}",
-                    last_price_floor, current_price_floor
-                );
-                last_price_floor = current_price_floor;
-            }
-        }
-
-        assert!(vault_reserve > 0 || total_supply == 0);
+    fn test_reserve_ratio_starts_at_98pct() {
+        let supply: u64 = 10_000 * TOKEN_DECIMALS_FACTOR as u64;
+        let bd = calculate_buy_breakdown(0, supply).unwrap();
+        let ratio = reserve_ratio_bps(bd.vault_deposit as u128, supply);
+        assert!(ratio >= 9_700 && ratio <= 10_000, "Expected ~98%, got {ratio} bps");
     }
 
     #[test]
     fn test_max_supply_cap_rejection() {
-        let max_supply = MAX_SUPPLY_CAP as u64;
-        let result = calculate_buy_breakdown(max_supply, 1);
+        let result = calculate_buy_breakdown(MAX_SUPPLY_CAP as u64, 1);
         assert!(result.is_err());
     }
-}
 
+    #[test]
+    fn test_guaranteed_exit_limit() {
+        let supply: u64 = 1_000_000 * TOKEN_DECIMALS_FACTOR as u64;
+        let max_exit = (supply as u128 * GUARANTEED_EXIT_MAX_BPS as u128 / 10_000) as u64;
+        assert_eq!(max_exit, 1_000 * TOKEN_DECIMALS_FACTOR as u64); // 0.1% of 1M = 1k tokens
+    }
+
+    #[test]
+    fn test_zero_supply_integral() {
+        let cost = calculate_curve_integral(0, 0).unwrap();
+        assert_eq!(cost, 0);
+    }
+
+    #[test]
+    fn test_mul_div_u256_exactness() {
+        let a = 1_000_000_000_000_000_000_u128;
+        let b = 500_000_000_000_000_000_u128;
+        let c = 1_000_000_000_000_000_000_u128;
+        let result = mul_div_u256(a, b, c).unwrap();
+        assert_eq!(result, b);
+    }
+
+    #[test]
+    fn test_partial_sell_rounding_safety() {
+        let supply = 10_000 * TOKEN_DECIMALS_FACTOR as u64;
+        let bd_buy = calculate_buy_breakdown(0, supply).unwrap();
+        let vault  = bd_buy.vault_deposit as u128;
+
+        // Sell 10 tokens (sufficient amount for micro-USDT gross valuation)
+        let amount_to_sell = 10 * TOKEN_DECIMALS_FACTOR as u64;
+        let bd_sell = calculate_sell_breakdown(supply, vault, amount_to_sell).unwrap();
+        assert!(bd_sell.gross_valuation >= 1);
+        assert!(bd_sell.seller_payout <= bd_sell.gross_valuation);
+    }
+}

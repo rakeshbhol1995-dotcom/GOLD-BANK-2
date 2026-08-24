@@ -13,19 +13,19 @@ export default function VirtualGoldTrustSection() {
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 border-b border-yellow-500/20 pb-6">
           <div className="space-y-1.5 max-w-2xl">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs font-bold font-mono">
-              <ShieldCheck className="w-4 h-4" /> MATHEMATICALLY VERIFIED • 0% RUG-PULL RISK
+              <ShieldCheck className="w-4 h-4" /> MATHEMATICALLY VERIFIED • MULTI-CHAIN PROTOCOL
             </div>
             <h2 className="text-2xl sm:text-3xl font-black text-white">
-              Why Virtual Gold Protocol is 100% Genuine & Rug-Proof
+              Why Virtual Gold Protocol is 100% Genuine, Transparent & Rug-Proof
             </h2>
             <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed">
-              Unlike speculative meme tokens with pre-mined insider allocations, Virtual Gold ($GOLD) is governed strictly by an immutable, automated Solana L1 Anchor Smart Contract. Every single token is backed by real collateral locked directly in the non-custodial Vault Reserve PDA.
+              Virtual Gold ($GOLD) is a 100% transparent cryptocurrency protocol backed by locked USDT reserves with zero admin theft risk. Deployed across **Polygon**, **BEP-20 (BSC)**, and **Solana**, every token is collateralized inside non-custodial Smart Contract Vault PDAs.
             </p>
           </div>
 
-          <div className="p-4 rounded-xl bg-black/80 border border-yellow-500/40 text-center shrink-0 w-full md:w-auto">
-            <div className="text-2xl font-black text-yellow-400 font-mono">100% ON-CHAIN</div>
-            <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider mt-0.5">Non-Custodial Reserve PDA</div>
+          <div className="p-4 rounded-xl bg-black/80 border border-yellow-500/40 text-center shrink-0 w-full md:w-auto space-y-1">
+            <div className="text-lg font-black text-yellow-400 font-mono">100% CRYPTO PROTOCOL</div>
+            <div className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Backed by USDT • Zero Admin Theft Risk</div>
           </div>
         </div>
 
@@ -49,7 +49,7 @@ export default function VirtualGoldTrustSection() {
             </div>
             <h3 className="text-base font-bold text-white">Holding Wealth Multiplier</h3>
             <p className="text-xs text-zinc-400 leading-relaxed">
-              Holding $GOLD tokens generates massive passive income over time. 1% of all global protocol buy and sell transactions is automatically distributed directly to token holders in USDT dividends.
+              Holding $GOLD tokens generates passive income over time. 1% of all global protocol buy and sell transactions is automatically distributed directly to token holders in real-time USDT dividends.
             </p>
           </div>
 
@@ -58,9 +58,9 @@ export default function VirtualGoldTrustSection() {
             <div className="w-10 h-10 rounded-lg bg-cyan-500/20 border border-cyan-500/40 text-cyan-400 flex items-center justify-center">
               <Lock className="w-5 h-5" />
             </div>
-            <h3 className="text-base font-bold text-white">Zero Admin Wallet Keys</h3>
+            <h3 className="text-base font-bold text-white">Zero Admin Theft & Direct Contract Access</h3>
             <p className="text-xs text-zinc-400 leading-relaxed">
-              Vault funds cannot be withdrawn, moved, or altered by any individual or founder. Only on-chain user burn instructions can release collateral back to users deterministically.
+              Admin has zero withdrawal keys. Collateral is locked in non-custodial Smart Contract PDAs. Even if the website UI goes offline, users can call the contract directly on-chain to burn tokens & withdraw USDT.
             </p>
           </div>
         </div>
@@ -161,8 +161,24 @@ export default function VirtualGoldTrustSection() {
           </div>
           <div className="p-3.5 rounded-xl bg-black/70 border border-yellow-500/20">
             <div className="text-[10px] text-zinc-400 uppercase font-semibold">Redemption</div>
-            <div className="text-sm font-black text-yellow-300 font-mono">24K Fine Gold Bars</div>
+            <div className="text-sm font-black text-yellow-300 font-mono">Instant USDT Vault Cash</div>
           </div>
+        </div>
+
+        {/* Explicit Anti-Scam Transparency & Auditor Disclosures */}
+        <div className="p-4 rounded-xl bg-yellow-500/10 border border-yellow-500/40 text-left space-y-2">
+          <div className="text-xs font-black text-yellow-300 uppercase tracking-wider flex items-center gap-1.5">
+            <ShieldCheck className="w-4 h-4 text-emerald-400" /> OFFICIAL PROTOCOL DISCLOSURES & AUDIT VERDICT
+          </div>
+          <p className="text-xs text-zinc-300 leading-relaxed">
+            <strong>Official Classification:</strong> Virtual Gold ($GOLD) is a <strong>Reserve-Backed Bonding-Curve Asset with Transaction-Funded Dividends</strong>.
+          </p>
+          <ul className="text-xs text-zinc-300 space-y-1 list-disc list-inside">
+            <li><strong>Collateral Backing:</strong> 100% USDT stablecoin reserves locked in an immutable Smart Contract Vault PDA (not physical gold bullion).</li>
+            <li><strong>Transaction-Funded Yield:</strong> Staking dividends are generated directly from 1% global transaction volume taxes across the protocol.</li>
+            <li><strong>Internal Vault Cashout Floor:</strong> The monotonic floor price <code className="text-yellow-400 font-mono">P_floor = V / S</code> governs the internal smart contract cashout redemption rate, guaranteeing 24/7 vault liquidity.</li>
+            <li><strong>Timelocked Governance:</strong> Protocol circuit breakers and upgrades are protected by a 48-hour timelocked multisig governance system.</li>
+          </ul>
         </div>
       </div>
     </section>

@@ -1,80 +1,120 @@
 use anchor_lang::prelude::*;
 
+pub const MAX_MULTISIG_SIGNERS: usize = 10;
+pub const EPOCH_SECONDS: i64 = 86_400; // 24 hours in seconds
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ProtocolConfig — Central Protocol State
+// ─────────────────────────────────────────────────────────────────────────────
 #[account]
 pub struct ProtocolConfig {
-    /// Admin authority who initialized the protocol (or Squads Multisig PDA)
-    pub admin: Pubkey,
-    
-    /// Wallet receiving 1% treasury buy/sell fees
-    pub admin_treasury: Pubkey,
-    
-    /// SPL Token Mint address for $IMG
-    pub img_mint: Pubkey,
-    
-    /// Bump seed for main protocol collateral vault PDA
-    pub vault_bump: u8,
-    
-    /// Bump seed for immutable locked reserve vault PDA (8% ratchet lock)
-    pub locked_vault_bump: u8,
+    // Identity
+    pub admin: Pubkey,                        // 32
+    pub admin_treasury: Pubkey,               // 32
+    pub img_mint: Pubkey,                     // 32
+    pub usdt_mint: Pubkey,                    // 32
 
-    /// Bump seed for separate holder dividend pool vault PDA
-    pub dividend_vault_bump: u8,
+    // PDA Bumps
+    pub vault_bump: u8,                       // 1
+    pub locked_vault_bump: u8,                // 1
+    pub dividend_vault_bump: u8,              // 1
 
-    /// Current circulating supply in raw 9-decimal units
-    pub total_supply: u64,
-    
-    /// Maximum supply cap: 21,000,000 $IMG (21,000,000 * 10^9)
-    pub max_supply_cap: u64,
-    
-    /// Total collateral vault reserve balance (in lamports / 6-decimal USDC)
-    pub vault_reserve: u64,
-    
-    /// Total accumulated dividend pool balance
-    pub dividend_pool_balance: u64,
-    
-    /// Total permanently locked ratchet reserve balance (8% sell fee lock)
-    pub ratchet_locked_reserve: u64,
-    
-    /// Accumulated dividend per share (scaled by 1e12 for zero precision loss)
-    pub acc_dividend_per_share: u128,
-    
-    /// Paused status flag
-    pub is_paused: bool,
+    // Supply
+    pub total_supply: u64,                    // 8
+    pub max_supply_cap: u64,                  // 8
+
+    // Reserves — u128 for full precision (no overflow at large balances)
+    pub vault_reserve: u128,                  // 16
+    pub dividend_pool_balance: u128,          // 16
+    pub ratchet_locked_reserve: u128,         // 16
+    pub tracked_excess_usdt: u128,            // 16
+    pub total_yield_injected: u128,           // 16  ← external real yield tracker
+
+    // Dividends
+    pub acc_dividend_per_share: u128,         // 16
+
+    // Status
+    pub is_paused: bool,                      // 1
+
+    // Governance
+    pub min_holding_slots: u64,               // 8  ← dividend holding period
 }
 
 impl ProtocolConfig {
-    pub const LEN: usize = 8 + // discriminator
-        32 + // admin
-        32 + // admin_treasury
-        32 + // img_mint
-        1 +  // vault_bump
-        1 +  // locked_vault_bump
-        1 +  // dividend_vault_bump
-        8 +  // total_supply
-        8 +  // max_supply_cap
-        8 +  // vault_reserve
-        8 +  // dividend_pool_balance
-        8 +  // ratchet_locked_reserve
-        16 + // acc_dividend_per_share (u128)
-        1;   // is_paused
+    pub const LEN: usize = 8
+        + 32 + 32 + 32 + 32          // pubkeys
+        + 1 + 1 + 1                  // bumps
+        + 8 + 8                      // supply fields
+        + 16 + 16 + 16 + 16 + 16     // u128 reserves + yield
+        + 16                         // acc_dividend_per_share
+        + 1                          // is_paused
+        + 8                          // min_holding_slots
+        + 64;                        // future-proof padding
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MultisigConfig — Timelocked multisig governance
+// ─────────────────────────────────────────────────────────────────────────────
+#[account]
+pub struct MultisigConfig {
+    pub threshold: u8,
+    pub signer_count: u8,
+    pub signers: [Pubkey; MAX_MULTISIG_SIGNERS],  // up to 10 signers
+    pub proposal_nonce: u64,
+}
+
+impl MultisigConfig {
+    pub const LEN: usize = 8 + 1 + 1 + (32 * MAX_MULTISIG_SIGNERS) + 8;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GovernanceProposal — Timelocked multisig governance proposals
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, PartialEq, Eq)]
+pub enum ProposalKind {
+    Pause,
+    Resume,
+    UpdateTreasury        { new_treasury: Pubkey },
+    UpdateAdmin           { new_admin: Pubkey },
+    UpdateMultisig        { new_signers: [Pubkey; MAX_MULTISIG_SIGNERS], new_signer_count: u8, new_threshold: u8 },
+    EmergencyUnpause,
+    InjectYieldApprove    { amount: u64 },
+    ReleaseRatchet        { amount: u64 },
+    UpdateHoldingSlots    { new_slots: u64 },
+    UpdateOraclePrice     { price_usd_micro: u64 },
 }
 
 #[account]
+pub struct GovernanceProposal {
+    pub multisig: Pubkey,
+    pub proposal_nonce: u64,
+    pub kind: ProposalKind,
+    pub proposer: Pubkey,
+    pub created_at: i64,
+    pub expires_at: i64,
+    pub executed: bool,
+    pub executed_at: i64,
+    pub approval_count: u8,
+    pub approvals: [Pubkey; MAX_MULTISIG_SIGNERS],
+}
+
+impl GovernanceProposal {
+    pub const LEN: usize = 8 + 32 + 8 + 400 + 32 + 8 + 8 + 1 + 8 + 1 + (32 * MAX_MULTISIG_SIGNERS);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UserAccount — Per-wallet dividend & exit tracking
+// ─────────────────────────────────────────────────────────────────────────────
+#[account]
 pub struct UserAccount {
-    /// Owner of this user position PDA
-    pub owner: Pubkey,
-    
-    /// Reward debt for scaled dividend distribution (u128)
-    pub reward_debt: u128,
-    
-    /// Accrued unclaimed dividend rewards (in lamports / base units)
-    pub pending_rewards: u64,
+    pub owner: Pubkey,             // 32
+    pub reward_debt: u128,         // 16
+    pub pending_rewards: u64,      // 8
+    pub last_buy_slot: u64,        // 8  ← for holding period enforcement
+    pub last_exit_epoch: i64,      // 8  ← per-epoch exit tracking
+    pub epoch_exited_amount: u64,  // 8  ← per-epoch cumulative exit tracking
 }
 
 impl UserAccount {
-    pub const LEN: usize = 8 + // discriminator
-        32 + // owner
-        16 + // reward_debt (u128)
-        8;   // pending_rewards
+    pub const LEN: usize = 8 + 32 + 16 + 8 + 8 + 8 + 8;
 }
-

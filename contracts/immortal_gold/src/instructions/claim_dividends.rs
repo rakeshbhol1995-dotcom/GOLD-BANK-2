@@ -1,36 +1,35 @@
 use anchor_lang::prelude::*;
-use anchor_lang::solana_program::{program::invoke_signed, system_instruction};
-use anchor_spl::token::{Mint, TokenAccount};
+use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 use crate::state::{ProtocolConfig, UserAccount};
 use crate::errors::ImmortalGoldError;
-use crate::math::DIVIDEND_PRECISION;
+use crate::math::{DIVIDEND_PRECISION, MIN_RESERVE_RATIO_BPS, TOKEN_DECIMALS_FACTOR, BASE_PRICE_P0};
+use crate::instructions::admin::ClaimDividendEvent;
 
 #[derive(Accounts)]
 pub struct ClaimDividends<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
 
-    #[account(
-        mut,
-        seeds = [b"protocol_config"],
-        bump
-    )]
+    #[account(mut, seeds = [b"protocol_config"], bump)]
     pub protocol_config: Account<'info, ProtocolConfig>,
 
-    #[account(
-        mut,
-        seeds = [b"user_account", user.key().as_ref()],
-        bump
-    )]
+    #[account(mut, seeds = [b"user_account", user.key().as_ref()], bump)]
     pub user_account: Account<'info, UserAccount>,
 
     #[account(
         mut,
-        seeds = [b"dividend_vault"],
-        bump = protocol_config.dividend_vault_bump
+        constraint = user_usdt_account.owner == user.key(),
+        constraint = user_usdt_account.mint == protocol_config.usdt_mint @ ImmortalGoldError::UnauthorizedMint
     )]
-    /// CHECK: Separate Dividend Vault PDA releasing accrued dividend rewards
-    pub dividend_vault: SystemAccount<'info>,
+    pub user_usdt_account: Account<'info, TokenAccount>,
+
+    #[account(
+        mut,
+        seeds = [b"dividend_vault"],
+        bump = protocol_config.dividend_vault_bump,
+        constraint = dividend_vault.mint == protocol_config.usdt_mint @ ImmortalGoldError::UnauthorizedMint
+    )]
+    pub dividend_vault: Account<'info, TokenAccount>,
 
     #[account(
         constraint = img_mint.key() == protocol_config.img_mint @ ImmortalGoldError::UnauthorizedMint
@@ -43,67 +42,78 @@ pub struct ClaimDividends<'info> {
     )]
     pub user_token_account: Account<'info, TokenAccount>,
 
+    pub token_program:  Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
 
 pub fn handler(ctx: Context<ClaimDividends>) -> Result<()> {
-    let config = &mut ctx.accounts.protocol_config;
-    let user_account = &mut ctx.accounts.user_account;
-    let user_spl_balance = ctx.accounts.user_token_account.amount;
+    let config     = &mut ctx.accounts.protocol_config;
+    let user       = &mut ctx.accounts.user_account;
+    let user_bal   = ctx.accounts.user_token_account.amount;
+    let now_slot   = Clock::get()?.slot;
 
-    // Calculate total claimable dividend using SPL Token Account balance directly
-    let mut total_claimable = user_account.pending_rewards as u128;
-
-    if user_spl_balance > 0 {
-        let accumulated = (user_spl_balance as u128)
-            .checked_mul(config.acc_dividend_per_share)
-            .ok_or(ImmortalGoldError::MathOverflow)?;
-
-        let current_pending = accumulated.checked_sub(user_account.reward_debt)
-            .unwrap_or(0) / DIVIDEND_PRECISION;
-
-        total_claimable = total_claimable.checked_add(current_pending)
-            .ok_or(ImmortalGoldError::MathOverflow)?;
+    // ── 1. Holding Period Guard ────────────────────────────────────────────────
+    // Prevents instant buy → dividend → sell attack
+    if user.last_buy_slot > 0 && config.min_holding_slots > 0 {
+        require!(
+            now_slot >= user.last_buy_slot + config.min_holding_slots,
+            ImmortalGoldError::HoldingPeriodNotMet
+        );
     }
 
-    let payout_amount = u64::try_from(total_claimable)
-        .map_err(|_| ImmortalGoldError::MathOverflow)?;
-    require!(payout_amount > 0, ImmortalGoldError::NoDividendsAvailable);
-    require!(config.dividend_pool_balance >= payout_amount, ImmortalGoldError::InsufficientVaultLiquidity);
+    // ── 2. Reserve Ratio Guard ─────────────────────────────────────────────────
+    // Dividends automatically suspend if reserve/supply < 90% of base price
+    // This protects principal redemption before yield distribution
+    if config.total_supply > 0 {
+        // reserve_per_token = vault_reserve / total_supply (in micro-USDT per raw token unit)
+        let reserve_per_token = config.vault_reserve / config.total_supply as u128;
+        // base_per_token = BASE_PRICE_P0 / TOKEN_DECIMALS_FACTOR (genesis price per raw unit)
+        let base_per_raw = BASE_PRICE_P0 / TOKEN_DECIMALS_FACTOR; // = 10 micro-USDT per unit
+        if base_per_raw > 0 {
+            let ratio_bps = (reserve_per_token * 10_000) / base_per_raw;
+            require!(
+                ratio_bps >= MIN_RESERVE_RATIO_BPS as u128,
+                ImmortalGoldError::ReserveTooLow
+            );
+        }
+    }
 
-    // Reset user pending rewards & debt
-    user_account.pending_rewards = 0;
-    user_account.reward_debt = (user_spl_balance as u128)
-        .checked_mul(config.acc_dividend_per_share)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
+    // ── 3. Calculate Total Claimable ───────────────────────────────────────────
+    let mut total: u128 = user.pending_rewards as u128;
+    if user_bal > 0 {
+        let acc     = (user_bal as u128)
+            .checked_mul(config.acc_dividend_per_share).ok_or(ImmortalGoldError::MathOverflow)?;
+        let pending = acc.saturating_sub(user.reward_debt) / DIVIDEND_PRECISION;
+        total = total.checked_add(pending).ok_or(ImmortalGoldError::MathOverflow)?;
+    }
 
-    let dividend_vault_bump = config.dividend_vault_bump;
-    let dividend_signer_seeds = &[b"dividend_vault".as_ref(), &[dividend_vault_bump]];
-    let signer = &[&dividend_signer_seeds[..]];
+    let payout = u64::try_from(total).map_err(|_| ImmortalGoldError::MathOverflow)?;
+    require!(payout > 0,                              ImmortalGoldError::NoDividendsAvailable);
+    require!(config.dividend_pool_balance >= payout as u128, ImmortalGoldError::InsufficientVaultLiquidity);
 
-    // Transfer claimable dividends directly from Separate Dividend Vault PDA to User via System CPI
-    invoke_signed(
-        &system_instruction::transfer(
-            &ctx.accounts.dividend_vault.key(),
-            &ctx.accounts.user.key(),
-            payout_amount,
-        ),
-        &[
-            ctx.accounts.dividend_vault.to_account_info(),
-            ctx.accounts.user.to_account_info(),
-            ctx.accounts.system_program.to_account_info(),
-        ],
-        signer,
+    // ── 4. Reset Debt & Pay ────────────────────────────────────────────────────
+    user.pending_rewards = 0;
+    user.reward_debt = (user_bal as u128)
+        .checked_mul(config.acc_dividend_per_share).ok_or(ImmortalGoldError::MathOverflow)?;
+
+    let dv_bump = config.dividend_vault_bump;
+    let seeds   = &[b"dividend_vault".as_ref(), &[dv_bump]];
+    let signer  = &[&seeds[..]];
+
+    token::transfer(
+        CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(),
+            Transfer {
+                from:      ctx.accounts.dividend_vault.to_account_info(),
+                to:        ctx.accounts.user_usdt_account.to_account_info(),
+                authority: ctx.accounts.dividend_vault.to_account_info(),
+            }, signer),
+        payout,
     )?;
 
-    config.dividend_pool_balance = config.dividend_pool_balance.checked_sub(payout_amount)
-        .ok_or(ImmortalGoldError::MathOverflow)?;
+    config.dividend_pool_balance = config.dividend_pool_balance
+        .checked_sub(payout as u128).ok_or(ImmortalGoldError::MathOverflow)?;
 
-    emit!(crate::instructions::admin::ClaimDividendEvent {
-        user: ctx.accounts.user.key(),
-        payout_amount,
-    });
-
-    msg!("Claimed {} dividend rewards from Dividend Vault.", payout_amount);
+    emit!(ClaimDividendEvent { user: ctx.accounts.user.key(), payout_amount: payout });
+    msg!("Claimed {} micro-USDT dividend. Reserve ratio guarded.", payout);
     Ok(())
 }

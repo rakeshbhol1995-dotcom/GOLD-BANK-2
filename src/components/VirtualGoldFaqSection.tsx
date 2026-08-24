@@ -15,13 +15,13 @@ const FAQ_LIST: FaqItem[] = [
     id: 'faq_1',
     category: 'GENERAL',
     question: 'What is Virtual Gold Protocol ($GOLD)?',
-    answer: 'Virtual Gold Protocol ($GOLD) is a sovereign digital gold asset built on Solana L1. Each 1 Gram $GOLD is backed by real collateral locked in a non-custodial Smart Contract Vault PDA. Unlike traditional crypto tokens, $GOLD features an automated bonding curve that guarantees a non-decreasing minimum cash floor price.'
+    answer: 'Virtual Gold ($GOLD) is a Reserve-Backed Bonding-Curve Asset with Transaction-Funded Dividends. Each 1 Gram $GOLD is collateralized by 100% USDT locked inside an immutable Smart Contract Vault PDA on Solana L1.'
   },
   {
     id: 'faq_2',
     category: 'SECURITY',
     question: 'Is Virtual Gold 100% Genuine and safe from rug-pulls?',
-    answer: 'Yes! Virtual Gold is 100% mathematically verified and rug-proof. There are ZERO admin wallet keys that can withdraw or drain the vault reserve. All collateral is held in an immutable Program Derived Address (PDA). Only user token burn instructions can trigger collateral releases.'
+    answer: 'Yes! All reserve collateral is held in an immutable Program Derived Address (PDA). Only user token burn instructions can trigger collateral releases. Circuit breakers and contract upgrades are protected by a 48-hour timelocked multisig governance system.'
   },
   {
     id: 'faq_3',
@@ -38,26 +38,38 @@ const FAQ_LIST: FaqItem[] = [
   {
     id: 'faq_5',
     category: 'SECURITY',
-    question: 'What happens for Late Buyers? Are they protected?',
-    answer: 'Late buyers buy into $GOLD when the guaranteed floor price (P_floor = V/S) is at its absolute highest point in history! Because the floor price can NEVER decrease, late buyers have 0% loss risk against market crashes—the vault guarantees instant cash redemption at peak floor value.'
+    question: 'What is the Monotonic Floor Price (P_floor)?',
+    answer: 'The monotonic floor price (P_floor = V / S) is the internal smart contract cashout redemption floor. Because 98% of buys and 8% of sells lock collateral permanently in the vault while 100% of sold tokens are burned, the internal vault redemption floor is mathematically non-decreasing.'
   },
   {
     id: 'faq_6',
     category: 'PROFIT',
-    question: 'How do 1% USDT Staking Dividends work?',
-    answer: '1% of every buy and sell transaction across the entire global protocol is automatically collected into the Staking Dividend Pool. Token holders earn real-time USDT dividend distributions simply by holding $GOLD in their wallets.'
+    question: 'How do Staking Dividends work?',
+    answer: 'Staking dividends are transaction-funded yields generated directly from a 1% volume tax on global protocol transactions. 1% of every buy and sell order is distributed directly to token holders in real-time USDT.'
   },
   {
     id: 'faq_7',
+    category: 'GENERAL',
+    question: 'Which blockchain networks are supported for USDT swaps?',
+    answer: 'Virtual Gold Protocol supports Multi-Chain USDT deposits and payouts across 7 major networks: Ethereum (ERC-20), BNB Smart Chain (BEP-20), Polygon (POS), Arbitrum (One), Solana (SPL Token), Avalanche (C-Chain), and Optimism. You can transfer USDT from any wallet on any chain, and receive $GOLD tokens instantly!'
+  },
+  {
+    id: 'faq_8',
     category: 'GENERAL',
     question: 'What is the base price and total supply of $GOLD?',
     answer: 'The genesis base price is $10.00 USDT per 1 Gram $GOLD (~₹945 INR). Total protocol supply is hard-capped at 21,000,000 Grams (21 Million Grams), making $GOLD as scarce as Bitcoin.'
   },
   {
-    id: 'faq_8',
+    id: 'faq_9',
     category: 'P2P',
-    question: 'How can I apply to become an authorized P2P Merchant?',
-    answer: 'Click the "Apply Merchant" button in the website header and fill out the merchant application form with your name, phone, merchant UPI VPA, and liquidity capacity. Once approved by protocol governance, you can earn P2P spread profits on daily fiat orders.'
+    question: 'How do I log in or apply to become an authorized P2P Merchant?',
+    answer: 'Merchant login and applications are handled exclusively on our dedicated Merchant Subdomain Portal (merchant.virtualgold.org / /merchant route). Visit the merchant portal to log in with your Merchant ID or apply for a $2,000 USDT collateral merchant license.'
+  },
+  {
+    id: 'faq_10',
+    category: 'SECURITY',
+    question: 'Can the Admin or Founder steal funds or shut down user access?',
+    answer: 'No. The admin has zero withdrawal keys or access to vault collateral. All reserves are locked in non-custodial Program Derived Address (PDA) smart contracts. Even if the website front-end or domain goes offline, users can directly interact with the smart contract on-chain (via PolygonScan / Block Explorer) to burn $GOLD tokens and withdraw their USDT.'
   }
 ];
 

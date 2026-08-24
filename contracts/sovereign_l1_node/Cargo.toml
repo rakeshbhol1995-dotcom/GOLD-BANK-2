@@ -1,0 +1,15 @@
+[package]
+name = "sovereign-l1-node"
+version = "5.0.0"
+edition = "2021"
+authors = ["Virtual Gold Team <admin@virtualgold.org>"]
+description = "Standalone Native Sovereign Layer 1 Blockchain Engine for Virtual Gold Protocol ($GOLD) with USDT Bonding Curve and Monotonic Price Floor Invariants"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+blake3 = "1.5"
+tokio = { version = "1.36", features = ["full"] }
+warp = "0.3"
+chrono = "0.4"

@@ -7,14 +7,15 @@ import SellCashPayoutModal from './SellCashPayoutModal';
 import Web3UsdtTransferModal from './Web3UsdtTransferModal';
 import { getLiveUsdtInrRate } from '@/services/exchangeRateService';
 
-export const TOKEN_DECIMALS = 1_000_000_000;
+export const TOKEN_DECIMALS = 1_000_000; // 6 Decimals for USDT & $GOLD
 export const MAX_SUPPLY_CAP = 21_000_000; // 21 Million Grams Total Supply Cap
-export const BASE_PRICE_P0 = 10; // 1 Gram Gold = 10 USDT (Min buy: 1 USDT)
+export const BASE_PRICE_P0 = 10; // $10.00 USDT Base Price
+export const TARGET_PRICE_P1 = 10_000; // $10,000.00 USDT Peak Target Price
 
-/// Unbounded Dynamic Price Engine (No pre-fixed ceiling! Grows dynamically beyond Bitcoin $100K+)
 export function calculatePriceAtSupply(supply: number): number {
   if (supply <= 0) return BASE_PRICE_P0;
-  return BASE_PRICE_P0 + Math.pow(supply / 100000, 1.8);
+  if (supply >= MAX_SUPPLY_CAP) return TARGET_PRICE_P1;
+  return BASE_PRICE_P0 + ((TARGET_PRICE_P1 - BASE_PRICE_P0) / MAX_SUPPLY_CAP) * supply;
 }
 
 export function calculateIntegral(sStart: number, sEnd: number): number {
@@ -27,6 +28,8 @@ export function calculateIntegral(sStart: number, sEnd: number): number {
 interface BondingCurveCalculatorProps {
   currentSupply: number;
   vaultReserve: number;
+  userGoldBalance?: number;
+  userUsdtBalance?: number;
   onBuyTx: (amount: number, grossCost: number, vaultDeposit: number) => void;
   onSellTx: (amount: number, sellerPayout: number) => void;
 }
@@ -34,6 +37,8 @@ interface BondingCurveCalculatorProps {
 export default function BondingCurveCalculator({
   currentSupply,
   vaultReserve,
+  userGoldBalance = 0,
+  userUsdtBalance = 0,
   onBuyTx,
   onSellTx
 }: BondingCurveCalculatorProps) {
@@ -65,7 +70,6 @@ export default function BondingCurveCalculator({
   const buyVaultDeposit = buyGrossCost * 0.98;
 
   // Sell Calculations (10% Fee: 90% Seller, 8% Vault Lock, 1% Treasury, 1% Dividend)
-  // Gross valuation derived from proportional vault share: V(t) * (deltaS / S(t))
   const sellGrossValuation = currentSupply > 0 ? vaultReserve * (amount / currentSupply) : 0;
   const sellTreasuryFee = sellGrossValuation * 0.01;
   const sellDividendFee = sellGrossValuation * 0.01;
@@ -124,54 +128,85 @@ export default function BondingCurveCalculator({
         {/* Source USDT Network Selection */}
         <div className="space-y-2 mb-4">
           <label className="text-xs font-semibold text-zinc-300 flex items-center justify-between">
-            <span>Pay with USDT (Any Chain):</span>
-            <span className="text-[10px] text-yellow-400 font-mono">virtualgold.org L1 Bridge</span>
+            <span>Select Target Protocol Chain:</span>
+            <span className="text-[10px] text-yellow-400 font-mono">Polygon • BEP-20 (BSC) • Solana</span>
           </label>
-          <div className="grid grid-cols-5 gap-1.5 text-[11px] font-bold">
-            {['ETH', 'BSC', 'POLYGON', 'ARBITRUM', 'SOLANA'].map((chain) => (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs font-bold">
+            {[
+              { id: 'POLYGON', label: 'Polygon (ERC-20)', icon: '🟣' },
+              { id: 'BSC', label: 'BEP-20 (Binance)', icon: '🟡' },
+              { id: 'SOLANA', label: 'Solana (Anchor)', icon: '🟢' }
+            ].map((chain) => (
               <button
-                key={chain}
+                key={chain.id}
                 type="button"
-                className="py-1.5 rounded-lg bg-black/60 border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/20 transition-all text-center"
+                className="py-2.5 px-3 rounded-xl bg-yellow-500/20 border border-yellow-400 text-yellow-300 shadow-md font-black flex items-center justify-center gap-2 hover:bg-yellow-500/30 transition-all text-center"
               >
-                {chain}
+                <span>{chain.icon}</span>
+                <span>{chain.label}</span>
               </button>
             ))}
           </div>
         </div>
 
-        {/* Amount Input & Fractional Buy Presets */}
+        {/* Amount Input & Fractional Buy/Sell Presets */}
         <div className="space-y-3 mb-5">
           <div className="flex justify-between items-center text-xs">
-            <span className="text-zinc-300 font-medium">Select Amount (Fractional Buy from $1):</span>
+            <span className="text-zinc-300 font-medium">
+              {tab === 'buy' ? 'Select Amount (Buy from $1):' : 'Select Amount to Sell:'}
+            </span>
             <span className="text-yellow-400 font-bold text-sm bg-yellow-500/10 px-2 py-0.5 rounded border border-yellow-500/20">
-              {amount} Grams $GOLD (~${(amount * currentPrice).toFixed(2)} USDT)
+              {amount.toFixed(4)} Grams $GOLD ({tab === 'buy' ? `~$${(amount * currentPrice).toFixed(2)} USDT` : `~$${sellPayout.toFixed(2)} Payout`})
             </span>
           </div>
 
-          {/* Quick Dollar Presets */}
-          <div className="grid grid-cols-5 gap-1 text-[10px] font-bold">
-            {[
-              { label: '$1 USDT', grams: 0.1 },
-              { label: '$5 USDT', grams: 0.5 },
-              { label: '$10 USDT', grams: 1.0 },
-              { label: '$50 USDT', grams: 5.0 },
-              { label: '$100 USDT', grams: 10.0 }
-            ].map((preset) => (
-              <button
-                key={preset.label}
-                type="button"
-                onClick={() => setAmount(preset.grams)}
-                className={`py-1.5 rounded-lg border text-center transition-all ${
-                  amount === preset.grams
-                    ? 'bg-yellow-500/30 border-yellow-400 text-yellow-300 shadow-sm'
-                    : 'bg-black/60 border-zinc-800 text-zinc-400 hover:text-white'
-                }`}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
+          {/* Dynamic Presets (BUY vs SELL) */}
+          {tab === 'buy' ? (
+            <div className="grid grid-cols-5 gap-1 text-[10px] font-bold">
+              {[
+                { label: '$1 USDT', grams: 0.1 },
+                { label: '$5 USDT', grams: 0.5 },
+                { label: '$10 USDT', grams: 1.0 },
+                { label: '$50 USDT', grams: 5.0 },
+                { label: '$100 USDT', grams: 10.0 }
+              ].map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => setAmount(preset.grams)}
+                  className={`py-1.5 rounded-lg border text-center transition-all ${
+                    amount === preset.grams
+                      ? 'bg-yellow-500/30 border-yellow-400 text-yellow-300 shadow-sm'
+                      : 'bg-black/60 border-zinc-800 text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-4 gap-1.5 text-[10px] font-bold">
+              {[
+                { label: '25%', factor: 0.25 },
+                { label: '50%', factor: 0.50 },
+                { label: '75%', factor: 0.75 },
+                { label: 'SELL ALL (MAX)', factor: 1.0 }
+              ].map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => setAmount(userGoldBalance * preset.factor)}
+                  className={`py-2 rounded-lg border text-center transition-all ${
+                    preset.factor === 1.0
+                      ? 'bg-red-500/30 border-red-400 text-red-300 font-black shadow-md'
+                      : 'bg-black/60 border-zinc-800 text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          )}
 
           <input
             type="range"
@@ -204,9 +239,9 @@ export default function BondingCurveCalculator({
               <span className="text-zinc-400">Treasury (1%) + Dividend Pool (1%):</span>
               <span className="font-bold text-zinc-400">${(buyTreasuryFee + buyDividendFee).toFixed(4)} USDT</span>
             </div>
-            <div className="flex justify-between text-cyan-400 font-semibold">
-              <span>Gateway Fee (+1.5% Paid by Buyer):</span>
-              <span>+${(buyGrossCost * 0.015).toFixed(4)} USDT</span>
+            <div className="flex justify-between text-emerald-400 font-semibold">
+              <span>Gateway Fee (0% Direct Protocol Settlement):</span>
+              <span>$0.00 USDT (FREE)</span>
             </div>
             <div className="pt-2 border-t border-zinc-800 flex justify-between">
               <span className="text-zinc-300 font-medium">New Floor Price P_floor:</span>
@@ -247,31 +282,41 @@ export default function BondingCurveCalculator({
         {tab === 'buy' ? (
           <>
             <button
-              onClick={() => setIsUpiModalOpen(true)}
+              onClick={() => onBuyTx(amount, buyGrossCost, buyVaultDeposit)}
               className="w-full py-4 rounded-xl bg-gold-gradient text-black font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-lg shadow-yellow-500/25 hover:scale-[1.02] active:scale-[0.98]"
             >
-              <Smartphone className="w-4 h-4 text-black" /> Buy $GOLD via P2P Merchant UPI (GPay / PhonePe / Paytm / QR)
+              <Zap className="w-4 h-4 text-black" /> ⚡ INSTANT SWAP (BUY ${amount.toFixed(2)} GRAMS $GOLD NOW)
             </button>
-            <button
-              onClick={() => setIsWeb3UsdtModalOpen(true)}
-              className="w-full py-3.5 rounded-xl bg-black/60 border border-yellow-500/30 text-yellow-300 font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 hover:bg-yellow-500/20 active:scale-[0.98]"
-            >
-              <Wallet className="w-4 h-4 text-yellow-400" /> Transfer Web3 USDT / SOL & Mint $GOLD (Auto Vault)
-            </button>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <button
+                onClick={() => setIsUpiModalOpen(true)}
+                className="py-2.5 px-3 rounded-xl bg-black/60 border border-yellow-500/30 text-yellow-300 font-bold text-[11px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 hover:bg-yellow-500/20 active:scale-[0.98]"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-yellow-400" /> P2P Merchant UPI (INR)
+              </button>
+              <button
+                onClick={() => setIsWeb3UsdtModalOpen(true)}
+                className="py-2.5 px-3 rounded-xl bg-black/60 border border-yellow-500/30 text-yellow-300 font-bold text-[11px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 hover:bg-yellow-500/20 active:scale-[0.98]"
+              >
+                <Wallet className="w-3.5 h-3.5 text-yellow-400" /> Web3 USDT Transfer
+              </button>
+            </div>
           </>
         ) : (
           <>
             <button
-              onClick={() => setIsSellCashModalOpen(true)}
-              className="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-black font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/25 hover:scale-[1.02] active:scale-[0.98]"
-            >
-              <Landmark className="w-4 h-4 text-black" /> Sell $GOLD & Payout Cash via P2P Merchant Bank / UPI
-            </button>
-            <button
               onClick={() => onSellTx(amount, sellPayout)}
-              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-500/25 hover:scale-[1.02] active:scale-[0.98]"
+              className="w-full py-4 rounded-xl bg-gradient-to-r from-red-600 to-amber-600 text-white font-black text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 shadow-lg shadow-red-500/25 hover:scale-[1.02] active:scale-[0.98]"
             >
-              <Flame className="w-4 h-4" /> Sell $GOLD & Receive Direct Vault USDT Payout (Auto Burn)
+              <Flame className="w-4 h-4 text-white" /> 🔥 INSTANT SWAP (SELL ${amount.toFixed(2)} GRAMS $GOLD FOR USDT)
+            </button>
+
+            <button
+              onClick={() => setIsSellCashModalOpen(true)}
+              className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 border border-emerald-500/40 text-emerald-300 font-extrabold text-xs uppercase tracking-wider transition-all flex items-center justify-center gap-2 hover:bg-emerald-500/30 active:scale-[0.98]"
+            >
+              <Landmark className="w-4 h-4 text-emerald-400" /> P2P Merchant Bank / UPI Payout (INR)
             </button>
           </>
         )}

@@ -8,7 +8,7 @@ export interface SwapTransaction {
   txHash: string;
   type: 'BUY' | 'SELL';
   wallet: string;
-  chain: 'ETH' | 'BSC' | 'POLYGON' | 'ARBITRUM' | 'SOLANA';
+  chain: 'ETH' | 'BSC' | 'POLYGON' | 'ARBITRUM' | 'SOLANA' | 'AVALANCHE' | 'OPTIMISM';
   goldAmount: number;
   usdtValue: number;
   timestamp: string;
@@ -45,23 +45,41 @@ export default function L1BlockScanner({ transactionsList = [] }: L1BlockScanner
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-yellow-500/20 pb-6">
         <div>
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-bold font-mono">
-            <Activity className="w-4 h-4" /> LIVE REAL ON-CHAIN EXPLORER
+            <Activity className="w-4 h-4" /> LIVE REAL ON-CHAIN EXPLORER (POLYGON POS MAINNET)
           </div>
           <h2 className="text-2xl sm:text-3xl font-black text-white mt-1.5">
             L1 Block Explorer & Real Swap Ledger
           </h2>
           <p className="text-xs text-zinc-300 mt-0.5">
-            Every buy, sell, and burn transaction is logged in real-time on Solana L1. Zero mock transactions.
+            Every buy, sell, and mint transaction is verified on Polygon Mainnet. Zero mock transactions.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href="https://polygonscan.com/address/0xC8136A9F384700437F5f0EbC68dF31e713d4d785"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1.5 rounded-xl bg-purple-500/10 border border-purple-500/30 hover:border-purple-400 text-[11px] text-purple-300 font-bold flex items-center gap-1.5 transition-all"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-purple-400" /> Vault Contract <ExternalLink className="w-3 h-3 text-purple-400" />
+          </a>
+
+          <a
+            href="https://polygonscan.com/token/0xed5d2fC46b85647F93E3Cba01E1DF5ACfe719cd0"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3 py-1.5 rounded-xl bg-yellow-500/10 border border-yellow-500/30 hover:border-yellow-400 text-[11px] text-yellow-300 font-bold flex items-center gap-1.5 transition-all"
+          >
+            <Zap className="w-3.5 h-3.5 text-yellow-400" /> $GOLD Token <ExternalLink className="w-3 h-3 text-yellow-400" />
+          </a>
+
           <button
             onClick={handleRefresh}
             className="px-3.5 py-2 rounded-xl bg-black/80 border border-zinc-800 hover:border-yellow-500/40 text-xs text-zinc-300 font-bold flex items-center gap-2 transition-all active:scale-95"
           >
             <RefreshCw className={`w-3.5 h-3.5 text-yellow-400 ${isRefreshing ? 'animate-spin' : ''}`} />
-            Refresh Ledger
+            Refresh
           </button>
         </div>
       </div>
@@ -133,8 +151,21 @@ export default function L1BlockScanner({ transactionsList = [] }: L1BlockScanner
                       {tx.chain}
                     </span>
                   </div>
-                  <div className="text-[11px] text-zinc-400 mt-0.5">
-                    Hash: <span className="text-yellow-300/90">{tx.txHash}</span>
+                  <div className="text-[11px] text-zinc-400 mt-0.5 flex items-center gap-1.5">
+                    <span>Hash:</span>
+                    {tx.txHash.startsWith('0x') ? (
+                      <a
+                        href={`https://polygonscan.com/tx/${tx.txHash.split('...')[0]}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-yellow-300 hover:text-yellow-400 font-bold underline flex items-center gap-1"
+                        title="Inspect transaction on PolygonScan"
+                      >
+                        {tx.txHash} <ExternalLink className="w-3 h-3" />
+                      </a>
+                    ) : (
+                      <span className="text-yellow-300/90">{tx.txHash}</span>
+                    )}
                   </div>
                 </div>
               </div>
